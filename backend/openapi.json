@@ -1,0 +1,939 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "FastAPI", "version": "0.1.0" },
+  "paths": {
+    "/chat/agent/query/stream": {
+      "post": {
+        "tags": ["chat"],
+        "summary": "Query Stream",
+        "description": "查询Agent流式响应",
+        "operationId": "query_stream_chat_agent_query_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/QueryRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/chat/rag/query": {
+      "post": {
+        "tags": ["chat"],
+        "summary": "Query Rag",
+        "description": "RAG检索",
+        "operationId": "query_rag_chat_rag_query_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RAGRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RAGResponse" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/chat/session/{session_id}": {
+      "get": {
+        "tags": ["chat"],
+        "summary": "Get Session",
+        "description": "获取会话信息，使用user_id验证",
+        "operationId": "get_session_chat_session__session_id__get",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Session Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionResponse" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["chat"],
+        "summary": "Delete Session",
+        "description": "删除会话",
+        "operationId": "delete_session_chat_session__session_id__delete",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Session Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/sessions": {
+      "get": {
+        "tags": ["chat"],
+        "summary": "Get All Sessions",
+        "description": "获取所有会话ID",
+        "operationId": "get_all_sessions_chat_sessions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          }
+        }
+      }
+    },
+    "/chat/sessions/{user_id}": {
+      "get": {
+        "tags": ["chat"],
+        "summary": "Get User Sessions",
+        "description": "获取用户所有会话ID",
+        "operationId": "get_user_sessions_chat_sessions__user_id__get",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "User Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/reorder": {
+      "post": {
+        "tags": ["chat"],
+        "summary": "Reorder Documents",
+        "description": "使用Ollama本地的嵌入模型对文档进行中文重排序",
+        "operationId": "reorder_documents_chat_reorder_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ReorderRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ReorderResponse" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/add/single": {
+      "post": {
+        "tags": ["knowledge"],
+        "summary": "Add Vector Single",
+        "description": "上传文件，将文件保存到向量数据库，仅支持TXT和PDF",
+        "operationId": "add_vector_single_knowledge_add_single_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_add_vector_single_knowledge_add_single_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/knowledge/add/multiple": {
+      "post": {
+        "tags": ["knowledge"],
+        "summary": "Add Vector Multiple",
+        "description": "上传多个文件，将文件保存到向量数据库，仅支持TXT和PDF",
+        "operationId": "add_vector_multiple_knowledge_add_multiple_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_add_vector_multiple_knowledge_add_multiple_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/knowledge/add/multiple/stream": {
+      "post": {
+        "tags": ["knowledge"],
+        "summary": "Add Vector Multiple Stream",
+        "description": "上传多个文件，流式返回处理进度，仅支持TXT、PDF、MD、PPTX、DOCX",
+        "operationId": "add_vector_multiple_stream_knowledge_add_multiple_stream_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_add_vector_multiple_stream_knowledge_add_multiple_stream_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/knowledge/clean": {
+      "delete": {
+        "tags": ["knowledge"],
+        "summary": "Clean User Vectors",
+        "description": "删除用户上传的所有向量",
+        "operationId": "clean_user_vectors_knowledge_clean_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/knowledge/md5/clear": {
+      "delete": {
+        "tags": ["knowledge"],
+        "summary": "Clear User Md5",
+        "description": "清空用户的MD5记录\n:param delete_documents: 是否同时删除知识库文档（默认True）",
+        "operationId": "clear_user_md5_knowledge_md5_clear_delete",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "delete_documents",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Delete Documents"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/md5/delete/{md5_value}": {
+      "delete": {
+        "tags": ["knowledge"],
+        "summary": "Delete Single Md5",
+        "description": "删除单个MD5记录及其对应的知识库内容\n:param md5_value: 要删除的MD5值\n:param delete_documents: 是否同时删除知识库文档（默认True）",
+        "operationId": "delete_single_md5_knowledge_md5_delete__md5_value__delete",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "md5_value",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Md5 Value" }
+          },
+          {
+            "name": "delete_documents",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Delete Documents"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/delete/filename": {
+      "delete": {
+        "tags": ["knowledge"],
+        "summary": "Delete By Filename",
+        "description": "通过文件名删除MD5记录及其对应的知识库文档\n:param filename: 要删除的文件名\n:param delete_documents: 是否同时删除知识库文档（默认True）",
+        "operationId": "delete_by_filename_knowledge_delete_filename_delete",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "title": "Filename" }
+          },
+          {
+            "name": "delete_documents",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Delete Documents"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/md5/list": {
+      "get": {
+        "tags": ["knowledge"],
+        "summary": "Get All Md5 Records",
+        "description": "获取用户的所有MD5记录",
+        "operationId": "get_all_md5_records_knowledge_md5_list_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MD5ListResponse" }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/knowledge/md5/{md5_value}": {
+      "get": {
+        "tags": ["knowledge"],
+        "summary": "Get Md5 Info",
+        "description": "获取MD5对应的文档信息\n:param md5_value: MD5值",
+        "operationId": "get_md5_info_knowledge_md5__md5_value__get",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "md5_value",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Md5 Value" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MD5Record" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/list": {
+      "get": {
+        "tags": ["knowledge"],
+        "summary": "Get User Knowledge List",
+        "description": "获取用户的知识库文档列表",
+        "operationId": "get_user_knowledge_list_knowledge_list_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/knowledge/detail": {
+      "get": {
+        "tags": ["knowledge"],
+        "summary": "Get Document Detail",
+        "description": "获取文档详情内容",
+        "operationId": "get_document_detail_knowledge_detail_get",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "title": "Filename" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeDocumentDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/chunks": {
+      "get": {
+        "tags": ["knowledge"],
+        "summary": "Get Document Chunks",
+        "description": "获取文档切片信息",
+        "operationId": "get_document_chunks_knowledge_chunks_get",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "title": "Filename" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentChunksResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": ["健康检查"],
+        "summary": "健康检查",
+        "description": "健康检查-存活",
+        "operationId": "get_health_application_status_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": ["健康检查"],
+        "summary": "健康检查",
+        "description": "健康检查-就绪",
+        "operationId": "get_health_readiness_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          }
+        }
+      }
+    },
+    "/user/detail/": {
+      "get": {
+        "tags": ["user"],
+        "summary": "Get User Info",
+        "description": "获取用户信息",
+        "operationId": "get_user_info_user_detail__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Root",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          }
+        }
+      }
+    },
+    "/hello/{name}": {
+      "get": {
+        "summary": "Say Hello",
+        "operationId": "say_hello_hello__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Name" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_add_vector_multiple_knowledge_add_multiple_post": {
+        "properties": {
+          "files": {
+            "items": { "type": "string", "format": "binary" },
+            "type": "array",
+            "title": "Files",
+            "description": "要上传的文件列表，仅支持PDF和TXT格式"
+          }
+        },
+        "type": "object",
+        "required": ["files"],
+        "title": "Body_add_vector_multiple_knowledge_add_multiple_post"
+      },
+      "Body_add_vector_multiple_stream_knowledge_add_multiple_stream_post": {
+        "properties": {
+          "files": {
+            "items": { "type": "string", "format": "binary" },
+            "type": "array",
+            "title": "Files",
+            "description": "要上传的文件列表，仅支持PDF、TXT、MD、PPTX、DOCX格式"
+          }
+        },
+        "type": "object",
+        "required": ["files"],
+        "title": "Body_add_vector_multiple_stream_knowledge_add_multiple_stream_post"
+      },
+      "Body_add_vector_single_knowledge_add_single_post": {
+        "properties": {
+          "file": { "type": "string", "format": "binary", "title": "File" }
+        },
+        "type": "object",
+        "required": ["file"],
+        "title": "Body_add_vector_single_knowledge_add_single_post"
+      },
+      "ChunkInfo": {
+        "properties": {
+          "chunk_id": { "type": "string", "title": "Chunk Id" },
+          "index": { "type": "integer", "title": "Index" },
+          "content": { "type": "string", "title": "Content" },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": ["chunk_id", "index", "content", "metadata"],
+        "title": "ChunkInfo",
+        "description": "文档切片信息模型"
+      },
+      "DocumentChunksResponse": {
+        "properties": {
+          "filename": { "type": "string", "title": "Filename" },
+          "total_chunks": { "type": "integer", "title": "Total Chunks" },
+          "chunks": {
+            "items": { "$ref": "#/components/schemas/ChunkInfo" },
+            "type": "array",
+            "title": "Chunks"
+          }
+        },
+        "type": "object",
+        "required": ["filename", "total_chunks", "chunks"],
+        "title": "DocumentChunksResponse",
+        "description": "文档切片列表响应模型"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": { "$ref": "#/components/schemas/ValidationError" },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "KnowledgeDocument": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "filename": { "type": "string", "title": "Filename" },
+          "original_filename": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Original Filename"
+          },
+          "user_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "User Id"
+          },
+          "chunk_count": { "type": "integer", "title": "Chunk Count" },
+          "preview": { "type": "string", "title": "Preview" },
+          "created_at": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": ["id", "filename", "chunk_count", "preview"],
+        "title": "KnowledgeDocument",
+        "description": "知识库文档信息模型"
+      },
+      "KnowledgeDocumentDetail": {
+        "properties": {
+          "id": { "type": "string", "title": "Id" },
+          "filename": { "type": "string", "title": "Filename" },
+          "user_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "User Id"
+          },
+          "chunk_count": { "type": "integer", "title": "Chunk Count" },
+          "content": { "type": "string", "title": "Content" },
+          "created_at": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": ["id", "filename", "chunk_count", "content"],
+        "title": "KnowledgeDocumentDetail",
+        "description": "知识库文档详情响应模型"
+      },
+      "KnowledgeListResponse": {
+        "properties": {
+          "documents": {
+            "items": { "$ref": "#/components/schemas/KnowledgeDocument" },
+            "type": "array",
+            "title": "Documents"
+          },
+          "total_count": { "type": "integer", "title": "Total Count" }
+        },
+        "type": "object",
+        "required": ["documents", "total_count"],
+        "title": "KnowledgeListResponse",
+        "description": "知识库文档列表响应模型"
+      },
+      "MD5ListResponse": {
+        "properties": {
+          "records": {
+            "items": { "$ref": "#/components/schemas/MD5Record" },
+            "type": "array",
+            "title": "Records"
+          },
+          "total_count": { "type": "integer", "title": "Total Count" }
+        },
+        "type": "object",
+        "required": ["records", "total_count"],
+        "title": "MD5ListResponse",
+        "description": "MD5记录列表响应模型"
+      },
+      "MD5Record": {
+        "properties": {
+          "md5": { "type": "string", "title": "Md5" },
+          "filename": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Filename"
+          },
+          "original_filename": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Original Filename"
+          },
+          "upload_time": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Upload Time"
+          }
+        },
+        "type": "object",
+        "required": ["md5"],
+        "title": "MD5Record",
+        "description": "MD5记录模型"
+      },
+      "QueryRequest": {
+        "properties": {
+          "session_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Session Id"
+          },
+          "query": { "type": "string", "title": "Query" }
+        },
+        "type": "object",
+        "required": ["query"],
+        "title": "QueryRequest",
+        "description": "查询请求模型"
+      },
+      "RAGRequest": {
+        "properties": { "query": { "type": "string", "title": "Query" } },
+        "type": "object",
+        "required": ["query"],
+        "title": "RAGRequest",
+        "description": "RAG检索请求模型"
+      },
+      "RAGResponse": {
+        "properties": { "response": { "type": "string", "title": "Response" } },
+        "type": "object",
+        "required": ["response"],
+        "title": "RAGResponse",
+        "description": "RAG检索响应模型"
+      },
+      "ReorderRequest": {
+        "properties": {
+          "query": { "type": "string", "title": "Query" },
+          "documents": {
+            "items": { "type": "string" },
+            "type": "array",
+            "title": "Documents"
+          }
+        },
+        "type": "object",
+        "required": ["query", "documents"],
+        "title": "ReorderRequest",
+        "description": "重排序请求模型"
+      },
+      "ReorderResponse": {
+        "properties": {
+          "documents": {
+            "items": { "additionalProperties": true, "type": "object" },
+            "type": "array",
+            "title": "Documents"
+          }
+        },
+        "type": "object",
+        "required": ["documents"],
+        "title": "ReorderResponse",
+        "description": "重排序响应模型"
+      },
+      "SessionResponse": {
+        "properties": {
+          "session_id": { "type": "string", "title": "Session Id" },
+          "history": {
+            "items": {
+              "prefixItems": [{ "type": "string" }, { "type": "string" }],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "History"
+          }
+        },
+        "type": "object",
+        "required": ["session_id", "history"],
+        "title": "SessionResponse",
+        "description": "会话响应模型"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": { "anyOf": [{ "type": "string" }, { "type": "integer" }] },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": { "type": "string", "title": "Message" },
+          "type": { "type": "string", "title": "Error Type" }
+        },
+        "type": "object",
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": { "HTTPBearer": { "type": "http", "scheme": "bearer" } }
+  }
+}

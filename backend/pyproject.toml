@@ -1,0 +1,94 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "A FastAPI + LangChain project for LLM applications"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+    { name = "RMA-MUN", email = "n3032747608@163.com" }
+]
+dependencies = [
+    "python-dotenv==1.2.2",
+    "SQLAlchemy==2.0.48",
+    "langchain-core==1.2.31",
+    "aiofiles==25.1.0",
+    "langchain-text-splitters==1.1.1",
+    "fastapi==0.123.0",
+    "starlette==0.50.0",
+    "pydantic-settings==2.13.1",
+    "langchain-community==0.4.1",
+    "python-jose==3.5.0",
+    "PyYAML==6.0.3",
+    "pydantic[email]==2.12.5",
+    "requests==2.32.5",
+    "httpx==0.28.1",
+    "uvicorn==0.21.1",
+    "aiomysql==0.3.2",
+    "redis==7.3.0",
+    "langchain==1.2.13",
+    "python-multipart==0.0.22",
+    "pypdf==6.9.2",
+    "python-magic==0.4.27",
+    "python-magic-bin==0.4.14; sys_platform == 'win32' or sys_platform == 'darwin'",
+    "langgraph-cli[inmem]==0.1.54",
+    "rank-bm25==0.2.2",
+    "pymupdf==1.25.0",
+    "pillow==11.1.0",
+    "passlib==1.7.4",
+    "shortuuid==1.0.11",
+    "imagehash==4.3.0",
+    "bcrypt==4.3.0",
+    "langchain-openai==1.1.14",
+    "neo4j==6.3.0",
+]
+
+# 开发依赖
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==1.0.0",
+    "pytest-cov==6.0.0",
+    "aiosqlite==0.21.0",
+    "black==24.10.0",
+    "isort==5.13.2",
+    "ruff==0.8.0",
+]
+
+# 文档解析依赖组：unstructured[all-docs] 含 torch/CUDA 栈（数 GB），默认安装保证本地/Docker 行为不变；
+# CI 用 `uv sync --no-group parsers` 跳过
+[dependency-groups]
+parsers = [
+    "unstructured[all-docs]==0.22.20",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning:fastapi.*",
+    "ignore::DeprecationWarning:pydantic.*",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 180
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default-groups = ["parsers"]

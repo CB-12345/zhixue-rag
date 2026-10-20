@@ -1,0 +1,1009 @@
+"""编排层测试：AgentFactory / get_agent_response / get_agent_stream_response。
+
+Level A（推荐）：monkeypatch `agent_factory.create_agent` 返回
+`FakeAgent`，测试编排逻辑（历史构建、消息拼接、异常回退、SSE 帧序列、
+规划阶段 token 过滤、会话写入）。
+Level C（尽力而为的真端到端）：不 mock create_agent，给工厂注入一个
+能发出真实 tool_call AIMessage 的假模型，让 create_agent 真正调用一次工具。
+"""
+import asyncio
+import json
+import types
+
+import pytest_asyncio
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.tools import tool
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph.state import CompiledStateGraph
+from sqlalchemy import select
+
+import app.services as services_module
+from app.agent import agent as agent_module
+from app.agent.agent import (
+    AgentFactory,
+    _get_session_lock,
+    get_agent,
+    get_agent_response,
+    get_agent_resume_stream_response,
+    get_agent_stream_response,
+)
+from app.agent.agent_rag_tool import search_rag
+from app.models.chat_history import ChatMessage, ChatSession
+from app.rag.agentic_rag.schemas import Evidence
+from app.rag.agentic_rag.service import AgenticRagService
+from tests.conftest import patch_session_factory
+from tests.fakes import FakeAgent
+
+
+# ---------------------------------------------------------------------------
+# 本地 fixtures / 事件构造器
+# ---------------------------------------------------------------------------
+@pytest_asyncio.fixture
+async def patched_db(monkeypatch, session_factory):
+    """把所有 AsyncSessionLocal 引用替换为内存 SQLite 会话工厂。"""
+    patch_session_factory(monkeypatch, session_factory)
+    yield session_factory
+
+
+@pytest_asyncio.fixture
+def fresh_session_manager(monkeypatch):
+    """清掉 session_manager 代理缓存的 DatabaseSessionManager 单例，
+    保证每个测试在 patch 后的 AsyncSessionLocal 上惰性创建全新实例。"""
+    monkeypatch.setattr(services_module, "database_session_manager", None)
+
+
+def _model_run_events(run_id: str, texts: list[str]) -> list[dict]:
+    """最终回答轮事件流：逐块 on_chat_model_stream（纯文本 chunk，实时转发）。"""
+    return [
+        {
+            "event": "on_chat_model_stream",
+            "name": "FakeChatModel",
+            "run_id": run_id,
+            "data": {"chunk": AIMessage(content=text)},
+        }
+        for text in texts
+    ]
+
+
+def _planning_stream_events(run_id: str) -> list[dict]:
+    """规划轮事件流：chunk 携带 tool_call_chunks（工具参数增量）→ 应被过滤。"""
+    return [
+        {
+            "event": "on_chat_model_stream",
+            "name": "FakeChatModel",
+            "run_id": run_id,
+            "data": {
+                "chunk": AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[{
+                        "name": "search_notes_tool",
+                        "args": '{"query": "测试"}',
+                        "id": "call_1",
+                        "index": 0,
+                        "type": "tool_call_chunk",
+                    }],
+                ),
+            },
+        },
+    ]
+
+
+def _tool_run_events(name: str, tool_input: dict, tool_output: str) -> list[dict]:
+    """工具调用事件流：on_tool_start + on_tool_end。"""
+    return [
+        {"event": "on_tool_start", "name": name, "data": {"input": tool_input}},
+        {"event": "on_tool_end", "name": name, "data": {"output": tool_output}},
+    ]
+
+
+def _agent_run_events(*, planning: int = 0,
+                      tools: list[tuple[str, dict, str]] | None = None,
+                      final: list[str] | None = None) -> list[dict]:
+    """一轮 agent 执行的事件流：可选规划轮（tool_call_chunks）/工具/最终回答（纯文本）。"""
+    events = []
+    for _ in range(planning):
+        events += _planning_stream_events("run-planning")
+    for name, tool_input, tool_output in tools or []:
+        events += _tool_run_events(name, tool_input, tool_output)
+    if final:
+        events += _model_run_events("run-final", final)
+    return events
+
+
+class RecordingAgent(FakeAgent):
+    """记录 astream_events/ainvoke 收到的输入，并可注入额外事件。"""
+
+    def __init__(self, events=None, messages=None):
+        super().__init__(messages=messages, events=events)
+
+
+class BrokenAgent:
+    """流式执行直接抛异常的替身 agent（async 生成器，异常在迭代时抛出）。"""
+
+    async def astream_events(self, inputs, version="v2", config=None):
+        if False:  # pragma: no cover
+            yield None
+        raise RuntimeError("代理内部异常")
+
+
+async def _collect_stream(*args, **kwargs):
+    """直接消费异步生成器，绕开 HTTP。"""
+    return [frame async for frame in get_agent_stream_response(*args, **kwargs)]
+
+
+def _parse_frames(raw_frames):
+    events = []
+    for raw in raw_frames:
+        body = raw[len("data: "):].rstrip("\n")
+        events.append(json.loads(body))
+    return events
+
+
+# ---------------------------------------------------------------------------
+# AgentFactory
+# ---------------------------------------------------------------------------
+def test_factory_returns_9_default_tools():
+    names = {t.name for t in AgentFactory._get_default_tools()}
+    assert names == {
+        "what_time_is_now",
+        "get_user_info_tools",
+        "search_notes_tool",
+        "get_note_stats_tool",
+        "get_today_reviews_tool",
+        "mark_reviewed_tool",
+        "create_note_tool",
+        "get_related_notes_tool",
+        "search_rag",
+    }
+
+
+def test_get_agent_returns_compiled_state_graph(monkeypatch):
+    """真实工厂路径：给定 KEY 后能构造出 create_agent 的编译图（不真正调用 LLM）。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-construction-test")
+    agent = get_agent()
+    assert isinstance(agent, CompiledStateGraph)
+
+
+async def test_agent_factory_injects_custom_tools(monkeypatch):
+    """custom_tools 会绕过默认工具列表（用假 agent 观察 tools 参数）。"""
+    seen = {}
+
+    def fake_factory(custom_tools=None, **kwargs):
+        seen["tools"] = custom_tools
+        return FakeAgent()
+
+    @tool
+    def dummy_tool(x: str) -> str:
+        """占位工具（不真正使用）。"""
+        return x
+
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", fake_factory)
+    my_tools = [dummy_tool]
+    await get_agent_response("你好", custom_tools=my_tools, user_id="u1")
+    assert seen["tools"] is my_tools
+
+
+# ---------------------------------------------------------------------------
+# get_agent_response（Level A）
+# ---------------------------------------------------------------------------
+async def test_get_agent_response_returns_final_message(monkeypatch):
+    fake = FakeAgent(messages=[AIMessage(content="答复")])
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    result = await get_agent_response("你好", user_id="u1")
+    assert result["response"] == "答复"
+    assert result["steps"] == []
+
+
+async def test_get_agent_response_fallback_when_no_content(monkeypatch):
+    fake = FakeAgent(messages=[AIMessage(content="")])
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    result = await get_agent_response("你好", user_id="u1")
+    assert result["response"] == "抱歉，我无法理解您的请求。"
+
+
+async def test_get_agent_response_history_building(monkeypatch):
+    fake = RecordingAgent(messages=[AIMessage(content="答复")])
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    history = [("用户问题", "助手回答")]
+    result = await get_agent_response("新问题", history=history, user_id="u1")
+
+    assert result["response"] == "答复"
+    messages = fake.inputs[0]["messages"]
+    assert [type(m).__name__ for m in messages] == ["HumanMessage", "AIMessage", "HumanMessage"]
+    assert [m.content for m in messages] == ["用户问题", "助手回答", "新问题"]
+
+
+async def test_get_agent_response_collects_steps(monkeypatch):
+    fake = FakeAgent(messages=[
+        AIMessage(content="", tool_calls=[
+            {"name": "search_notes_tool", "args": {"query": "测试"}, "id": "call_1"},
+        ]),
+        ToolMessage(content="搜索结果内容", tool_call_id="call_1"),
+        AIMessage(content="最终回答"),
+    ])
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    result = await get_agent_response("帮我找笔记", user_id="u1")
+    assert result["response"] == "最终回答"
+    assert len(result["steps"]) == 1
+    step = result["steps"][0]
+    assert step["tool"] == "search_notes_tool"
+    assert step["tool_input"] == {"query": "测试"}
+    assert step["tool_output"] == "搜索结果内容"
+
+
+async def test_get_agent_response_exception_fallback(monkeypatch):
+    def boom(**kwargs):
+        raise RuntimeError("模型连接失败")
+
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", boom)
+
+    result = await get_agent_response("你好", user_id="u1")
+    assert result["response"] == "抱歉，处理您的请求时出现了错误: 模型连接失败"
+    assert result["steps"] == []
+
+
+# ---------------------------------------------------------------------------
+# get_agent_stream_response（Level A）
+# ---------------------------------------------------------------------------
+async def test_get_agent_stream_response_full_flow(monkeypatch, patched_db, fresh_session_manager):
+    response_text = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    fake = FakeAgent(events=_agent_run_events(final=[response_text]))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    frames = await _collect_stream("你好", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+
+    # 1) 首帧：空内容 response + session_id
+    assert events[0]["type"] == "response"
+    assert events[0]["content"] == ""
+    assert events[0]["session_id"] == "s1"
+
+    # 2) 无 error 帧
+    assert all(e["type"] != "error" for e in events)
+
+    # 3) response 内容由最终模型调用的流事件原样转发
+    assert "".join(e["content"] for e in events if e["type"] == "response" and e["content"]) == response_text
+    assert [e["content"] for e in events if e["type"] == "response" and e["content"]] == [
+        response_text,
+    ]
+
+    # 4) 结束帧：done + session_id
+    assert events[-1]["type"] == "done"
+    assert events[-1]["session_id"] == "s1"
+
+    # 5) add_message 已把 user/assistant 对写入 SQLite
+    async with patched_db() as db:
+        sess = (await db.execute(select(ChatSession).where(ChatSession.id == "s1"))).scalar_one()
+        assert sess.user_id == "u1"
+        msgs = (await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == "s1").order_by(ChatMessage.id)
+        )).scalars().all()
+    assert [m.role for m in msgs] == ["user", "assistant"]
+    assert [m.content for m in msgs] == ["你好", response_text]
+
+
+async def test_get_agent_stream_response_emits_tool_start_and_end_events(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    fake = FakeAgent(events=_agent_run_events(tools=[
+        ("search_notes_tool", {"query": "测试"}, "真实搜索结果"),
+    ]))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    frames = await _collect_stream("帮我找笔记", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+    thinking = [event for event in events if event["type"] == "thinking"]
+
+    assert thinking == [
+        {
+            "type": "thinking",
+            "stage": "tool_start",
+            "content": "正在调用 search_notes_tool",
+            "details": {"tool": "search_notes_tool", "tool_input": {"query": "测试"}},
+        },
+        {
+            "type": "thinking",
+            "stage": "tool_end",
+            "content": "search_notes_tool 执行完成",
+            "details": {"tool": "search_notes_tool", "tool_output": "真实搜索结果"},
+        },
+    ]
+
+
+async def test_get_agent_stream_response_forwards_final_tokens_immediately(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    """最终回答的纯文本 chunk 逐块实时转发（打字机效果）。"""
+    fake = FakeAgent(events=_agent_run_events(final=["第", "一"]))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    frames = await _collect_stream("你好", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+    response_events = [
+        event for event in events if event["type"] == "response" and event["content"]
+    ]
+
+    assert [event["content"] for event in response_events] == ["第", "一"]
+
+
+async def test_get_agent_stream_response_tool_end_with_toolmessage_output(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    """LangGraph 的 on_tool_end output 是 ToolMessage，必须归一化为 content 字符串。"""
+    fake = FakeAgent(events=[
+        {
+            "event": "on_tool_start",
+            "name": "search_notes_tool",
+            "data": {"input": {"query": "deepseek"}},
+        },
+        {
+            "event": "on_tool_end",
+            "name": "search_notes_tool",
+            "data": {"output": ToolMessage(content="搜索结果", tool_call_id="call_1")},
+        },
+    ])
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    frames = await _collect_stream("给我介绍一下deepseek", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+
+    assert all(e["type"] != "error" for e in events)
+    thinking = [e for e in events if e["type"] == "thinking"]
+    tool_end = next(e for e in thinking if e["stage"] == "tool_end")
+    assert tool_end["details"]["tool_output"] == "搜索结果"
+    assert events[-1]["type"] == "done"
+
+
+async def test_get_agent_stream_response_forwards_real_search_rag_callback(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    """Real search_rag callback events travel through the stream queue before done."""
+    evidence = Evidence(
+        id="stream-note-1",
+        source="note",
+        title="流式证据",
+        content="可展示的证据内容",
+        score=0.87,
+        url="https://example.test/note-1",
+    )
+
+    async def fake_run(self, query, user_id, thinking_callback=None):
+        assert query == "补充检索问题"
+        assert user_id == "u1"
+        return type("Result", (), {
+            "context": "补充检索上下文",
+            "evidences": [evidence],
+            "used_web": False,
+        })()
+
+    class SearchRagStreamingAgent(FakeAgent):
+        async def astream_events(self, inputs, version="v2", config=None):
+            self.inputs.append(inputs)
+            yield {
+                "event": "on_tool_start",
+                "name": "search_rag",
+                "data": {"input": {"query": "补充检索问题"}},
+            }
+            tool_output = await search_rag.ainvoke({"query": "补充检索问题"})
+            yield {
+                "event": "on_tool_end",
+                "name": "search_rag",
+                "data": {"output": ToolMessage(content=tool_output, tool_call_id="call-1")},
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "name": "FakeChatModel",
+                "data": {"chunk": AIMessageChunk(content="流式最终回答")},
+            }
+
+    monkeypatch.setattr(AgenticRagService, "run", fake_run)
+    monkeypatch.setattr(
+        agent_module.agent_factory,
+        "create_agent",
+        lambda **kwargs: SearchRagStreamingAgent(),
+    )
+
+    frames = await _collect_stream("问题", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+
+    supplemental_index = next(
+        index for index, event in enumerate(events)
+        if event.get("type") == "thinking"
+        and event.get("stage") == "supplemental_retrieval"
+    )
+    done_index = next(index for index, event in enumerate(events) if event["type"] == "done")
+    supplemental = events[supplemental_index]
+    tool_end = next(
+        event for event in events
+        if event.get("type") == "thinking" and event.get("stage") == "tool_end"
+    )
+
+    assert supplemental["details"] == {
+        "query": "补充检索问题",
+        "status": "evidence",
+        "evidence_count": 1,
+        "results": [{
+            "id": "stream-note-1",
+            "source": "note",
+            "title": "流式证据",
+            "score": 0.87,
+            "url": "https://example.test/note-1",
+            "preview": "可展示的证据内容",
+        }],
+    }
+    tool_output = tool_end["details"]["tool_output"]
+    assert "[补充检索结果开始]" in tool_output
+    assert "[检索证据]" in tool_output
+    assert "[补充检索结果结束]" in tool_output
+    assert any(
+        event["type"] == "response" and event["content"] == "流式最终回答"
+        for event in events
+    )
+    response_index = next(
+        index for index, event in enumerate(events)
+        if event["type"] == "response" and event["content"] == "流式最终回答"
+    )
+    assert supplemental_index < response_index < done_index
+
+
+async def test_get_agent_stream_response_filters_planning_run_tokens(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    """规划轮（tool_call_chunks 增量）token 不得流入 response，最终回答实时转发。"""
+    fake = FakeAgent(events=_agent_run_events(
+        planning=1,
+        tools=[("search_notes_tool", {"query": "测试"}, "搜索结果")],
+        final=["最终回答"],
+    ))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    frames = await _collect_stream("帮我找笔记", session_id="s1", user_id="u1")
+    events_parsed = _parse_frames(frames)
+    response_events = [
+        event for event in events_parsed if event["type"] == "response" and event["content"]
+    ]
+
+    assert [event["content"] for event in response_events] == ["最终回答"]
+
+
+async def test_get_agent_stream_response_agent_error(monkeypatch, patched_db, fresh_session_manager):
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: BrokenAgent())
+
+    frames = await _collect_stream("你好", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+
+    assert events[0]["type"] == "response"
+    errors = [e for e in events if e["type"] == "error"]
+    assert len(errors) == 1
+    assert "代理内部异常" in errors[0]["content"]
+    assert events[-1]["type"] == "done"
+
+    # 出错路径不写会话历史
+    async with patched_db() as db:
+        msgs = (await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == "s1")
+        )).scalars().all()
+    assert msgs == []
+
+
+async def test_get_agent_stream_response_uses_db_history(monkeypatch, patched_db, fresh_session_manager):
+    async with patched_db() as db:
+        db.add(ChatSession(id="s1", user_id="u1", title="历史会话"))
+        await db.commit()
+        db.add_all([
+            ChatMessage(session_id="s1", role="user", content="旧问题"),
+            ChatMessage(session_id="s1", role="assistant", content="旧回答"),
+        ])
+        await db.commit()
+
+    fake = RecordingAgent(events=_agent_run_events(final=["新回答"]))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+
+    frames = await _collect_stream("新问题", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+    assert events[-1]["type"] == "done"
+
+    # run_agent 先从 DB 加载历史并构造消息序列
+    messages = fake.inputs[0]["messages"]
+    assert [type(m).__name__ for m in messages] == ["HumanMessage", "AIMessage", "HumanMessage"]
+    assert [m.content for m in messages] == ["旧问题", "旧回答", "新问题"]
+
+    # add_message 又在末尾追加了新的 user/assistant 对
+    async with patched_db() as db:
+        msgs = (await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == "s1").order_by(ChatMessage.id)
+        )).scalars().all()
+    assert [m.content for m in msgs] == ["旧问题", "旧回答", "新问题", "新回答"]
+
+
+async def test_get_agent_stream_response_with_rag_context(monkeypatch, patched_db, fresh_session_manager):
+    seen = {}
+
+    def capturing_factory(custom_system_prompt=None, **kwargs):
+        seen["system_prompt"] = custom_system_prompt
+        return FakeAgent(events=_agent_run_events(final=["基于资料的回答"]))
+
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", capturing_factory)
+
+    rag_context = "[来源：知识库《Local》]\n本地资料\n\n[来源：外部搜索《Web》]\n外部资料"
+    frames = await _collect_stream("问题", session_id="s1", user_id="u1", rag_context=rag_context)
+    events = _parse_frames(frames)
+    assert events[-1]["type"] == "done"
+
+    system_prompt = seen["system_prompt"]
+    assert system_prompt is not None
+    assert rag_context in system_prompt
+    assert "参考资料" in system_prompt
+    assert "区分本地证据" in system_prompt
+    assert "外部搜索证据" in system_prompt
+    assert "证据不足" in system_prompt
+    assert "search_rag" in system_prompt
+    assert "不要重复问一遍用户原话" in system_prompt
+
+
+async def test_get_agent_stream_response_default_system_prompt_without_rag(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    seen = {}
+
+    def capturing_factory(custom_system_prompt=None, **kwargs):
+        seen["system_prompt"] = custom_system_prompt
+        return FakeAgent(events=_agent_run_events(final=["回答"]))
+
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", capturing_factory)
+
+    frames = await _collect_stream("你好", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+    assert events[-1]["type"] == "done"
+
+    assert seen["system_prompt"] == agent_module.agent_factory.default_system_prompt
+
+
+# ---------------------------------------------------------------------------
+# Level C（尽力而为的真端到端）
+# ---------------------------------------------------------------------------
+async def test_level_c_end_to_end_real_tool_calling(monkeypatch):
+    """不 mock create_agent：真实 create_agent 编译图，
+    仅注入一个能发出 tool_call AIMessage 的假聊天模型，验证真实工具被调用。"""
+    from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+
+    class ToolCallingFakeModel(FakeMessagesListChatModel):
+        """第一次调用返回 tool_call，第二次返回最终答复（自循环）。"""
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+    calls = []
+
+    @tool
+    async def echo_tool(text: str) -> str:
+        """将传入文本原样返回（端到端工具调用测试用）。"""
+        calls.append(text)
+        return f"echo:{text}"
+
+    model = ToolCallingFakeModel(responses=[
+        AIMessage(content="", tool_calls=[
+            {"name": "echo_tool", "args": {"text": "你好世界"}, "id": "call_1"},
+        ]),
+        AIMessage(content="我已经调用了工具，回答完毕。"),
+    ])
+    monkeypatch.setattr(agent_module.agent_factory, "_create_chat_model", lambda custom_model=None: model)
+    # 真图 + MemorySaver：不碰生产 MySQL saver（controller 授权）。
+    monkeypatch.setattr(agent_module, "get_checkpointer", lambda: MemorySaver())
+
+    result = await get_agent_response("请确认工具调用链路", custom_tools=[echo_tool], user_id="u1")
+
+    assert result["response"] == "我已经调用了工具，回答完毕。"
+    assert calls == ["你好世界"]  # 真实工具确实被执行
+    assert any(step["tool"] == "echo_tool" for step in result["steps"])
+
+
+# ---------------------------------------------------------------------------
+# Task 4: HITL 审批中间件与 checkpointer 透传
+# ---------------------------------------------------------------------------
+def test_factory_default_middleware_contains_hitl():
+    from langchain.agents.middleware import HumanInTheLoopMiddleware
+
+    factory = AgentFactory()
+    assert any(isinstance(m, HumanInTheLoopMiddleware) for m in factory.default_middleware)
+    assert factory.approval_tools["create_note_tool"]["allowed_decisions"] == ["approve", "reject"]
+
+
+async def test_factory_create_agent_passes_checkpointer(monkeypatch):
+    """create_agent 透传 checkpointer=get_checkpointer()。"""
+    from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+
+    class ToolCallingFakeModel(FakeMessagesListChatModel):
+        """按调用次序逐条返回预设消息（覆盖 bind_tools 默认 NotImplementedError）。"""
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+    seen = {}
+    from langchain.agents import create_agent as real_create_agent
+
+    def fake_create_agent(*args, **kwargs):
+        seen["checkpointer"] = kwargs.pop("checkpointer", None)
+        # 仍走真实 create_agent，仅拦截参数观察（模型用假模型避免连网）
+        return real_create_agent(*args, **kwargs)
+
+    monkeypatch.setattr("app.agent.agent.create_agent", fake_create_agent)
+    monkeypatch.setattr(agent_module.agent_factory, "_create_chat_model",
+                        lambda custom_model=None: ToolCallingFakeModel(
+                            responses=[AIMessage(content="ok")]))
+    monkeypatch.setattr(agent_module, "get_checkpointer", lambda: object())
+
+    # mock 打在单例实例上（agent_factory），必须用单例调用：新实例看不到实例级 mock，
+    # 会走到真实 _create_chat_model，在无凭证环境（CI）直接报错
+    factory = agent_module.agent_factory
+    agent = factory.create_agent(custom_tools=[])
+    assert seen["checkpointer"] is not None
+    assert isinstance(agent, CompiledStateGraph)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: 流式编排中断检测 / resume / 清理
+# ---------------------------------------------------------------------------
+class InterruptingAgent(FakeAgent):
+    """astream_events 正常结束，但 aget_state 报告 __interrupt__。"""
+
+    def __init__(self, payload: dict | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self.interrupt_payload = payload or {
+            "action_requests": [{"name": "create_note_tool", "args": {"title": "t"}, "description": "x"}],
+            "review_configs": [{"action_name": "create_note_tool", "allowed_decisions": ["approve", "reject"]}],
+        }
+        self.deleted_threads = []
+
+    async def aget_state(self, config):
+        return types.SimpleNamespace(
+            next=("__interrupt__",),
+            values={"messages": self.messages},
+            interrupts=(types.SimpleNamespace(name="__interrupt__", value=self.interrupt_payload),),
+        )
+
+    async def adelete_thread(self, thread_id):
+        self.deleted_threads.append(thread_id)
+
+
+async def test_stream_interrupt_emits_interrupt_frame_and_sets_pending(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    agent = InterruptingAgent(messages=[AIMessage(content="")])
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: agent)
+    fake_saver = types.SimpleNamespace(adelete_thread=agent.adelete_thread)
+    monkeypatch.setattr(agent_module, "get_checkpointer", lambda: fake_saver)
+
+    frames = await _collect_stream("帮我记个笔记", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+    interrupts = [e for e in events if e["type"] == "interrupt"]
+    assert len(interrupts) == 1
+    assert interrupts[0]["run_id"]
+    assert interrupts[0]["payload"]["action_requests"][0]["name"] == "create_note_tool"
+    assert events[-1]["type"] == "interrupt"  # 中断帧收尾，无 done 帧
+    # 不写 ChatMessage 镜像
+    async with patched_db() as db:
+        msgs = (await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == "s1"))).scalars().all()
+    assert msgs == []
+    # pending_run_id 已写
+    async with patched_db() as db:
+        sess = (await db.execute(
+            select(ChatSession).where(ChatSession.id == "s1"))).scalar_one()
+    assert sess.pending_run_id is not None
+    assert agent.deleted_threads == []  # 中断不删 thread
+
+
+async def test_stream_interrupt_pending_guard_rejects_new_query(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    fake = FakeAgent(events=_agent_run_events(final=["不该执行"]))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+    # 先埋一个 pending
+    async with patched_db() as db:
+        db.add(ChatSession(id="s1", user_id="u1", pending_run_id="run-old"))
+        await db.commit()
+
+    frames = await _collect_stream("新问题", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+    errors = [e for e in events if e["type"] == "error"]
+    assert errors and errors[0]["content"].startswith("PENDING_EXISTS")
+
+
+async def test_resume_completes_and_retains_thread(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    response_text = "已创建笔记"
+    fake = FakeAgent(messages=[
+        HumanMessage(content="帮我记个笔记"),
+        AIMessage(content=response_text),
+    ], events=_agent_run_events(final=[response_text]))
+    fake.deleted = []
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+    fake_saver = types.SimpleNamespace(adelete_thread=lambda tid: fake.deleted.append(tid))
+    monkeypatch.setattr(agent_module, "get_checkpointer", lambda: fake_saver)
+    async with patched_db() as db:
+        db.add(ChatSession(id="s1", user_id="u1", pending_run_id="run-1"))
+        await db.commit()
+
+    frames = []
+    async for f in get_agent_resume_stream_response(
+        session_id="s1", user_id="u1", run_id="run-1",
+        decisions=[{"type": "approve"}],
+    ):
+        frames.append(f)
+    events = _parse_frames(frames)
+    assert "".join(e["content"] for e in events if e["type"] == "response" and e["content"]) == response_text
+    assert events[-1]["type"] == "done"
+    # resume 输入是 Command(resume=...)（FakeAgent 记录 inputs[0] 为 Command 对象）
+    assert getattr(fake.inputs[0], "resume", None) == {"decisions": [{"type": "approve"}]}
+    # 镜像落库；审批 thread 与 pending 保留（供查看审批前快照）
+    async with patched_db() as db:
+        sess = (await db.execute(
+            select(ChatSession).where(ChatSession.id == "s1"))).scalar_one()
+        msgs = (await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == "s1"))).scalars().all()
+    assert sess.pending_run_id == "run-1"
+    assert [m.role for m in msgs] == ["user", "assistant"]
+    assert [m.content for m in msgs] == ["帮我记个笔记", response_text]
+    assert fake.deleted == []
+
+
+async def test_resume_completed_rerun_rejected(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    """同一 run 审批完成后再次 resume：ALREADY_COMPLETED，不重复执行/落镜像。"""
+    fake = FakeAgent(messages=[AIMessage(content="不应执行")],
+                     events=_agent_run_events(final=["不应执行"]))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+    deleted: list[str] = []
+
+    async def _aget_tuple(config):
+        return types.SimpleNamespace(pending_writes=[])
+
+    async def _fake_delete(thread_id: str):
+        deleted.append(thread_id)
+
+    monkeypatch.setattr(agent_module, "get_checkpointer",
+                        lambda: types.SimpleNamespace(
+                            aget_tuple=_aget_tuple, adelete_thread=_fake_delete))
+    async with patched_db() as db:
+        db.add(ChatSession(id="s1", user_id="u1", pending_run_id="run-1"))
+        await db.commit()
+
+    frames = []
+    async for f in get_agent_resume_stream_response(
+        session_id="s1", user_id="u1", run_id="run-1",
+        decisions=[{"type": "approve"}],
+    ):
+        frames.append(f)
+    events = _parse_frames(frames)
+    errors = [e for e in events if e["type"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["content"] == "ALREADY_COMPLETED"
+    assert fake.inputs == []  # 图未被执行
+    async with patched_db() as db:
+        msgs = (await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == "s1"))).scalars().all()
+        sess = (await db.execute(
+            select(ChatSession).where(ChatSession.id == "s1"))).scalar_one()
+    assert msgs == []
+    assert sess.pending_run_id == "run-1"
+    assert deleted == []
+
+
+async def test_stream_guard_allows_new_query_after_completed_approval(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    """pending 指向已审批完成的 thread 时，新问题放行（pending 留待下次中断覆盖）。"""
+    fake = FakeAgent(messages=[AIMessage(content="新答复")],
+                     events=_agent_run_events(final=["新答复"]))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+    deleted: list[str] = []
+
+    async def _aget_tuple(config):
+        return types.SimpleNamespace(pending_writes=[])
+
+    async def _fake_delete(thread_id: str):
+        deleted.append(thread_id)
+
+    monkeypatch.setattr(agent_module, "get_checkpointer",
+                        lambda: types.SimpleNamespace(
+                            aget_tuple=_aget_tuple, adelete_thread=_fake_delete))
+    async with patched_db() as db:
+        db.add(ChatSession(id="s1", user_id="u1", pending_run_id="run-old"))
+        await db.commit()
+
+    frames = await _collect_stream("新问题", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+    assert events[-1]["type"] == "done"
+    assert not [e for e in events if e["type"] == "error"]
+    async with patched_db() as db:
+        sess = (await db.execute(
+            select(ChatSession).where(ChatSession.id == "s1"))).scalar_one()
+    assert sess.pending_run_id == "run-old"  # 无新中断，不覆盖
+    assert "run-old" not in deleted  # 历史审批 thread 保留
+    assert len(deleted) == 1  # 仅删除本次新 run 的 thread
+
+
+# ---------------------------------------------------------------------------
+# Fix wave：Finding 1——错误/取消路径的孤儿清理
+# ---------------------------------------------------------------------------
+async def test_stream_error_cleans_up_thread_no_mirror_no_pending(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    """首跑 agent 中途抛错：发 error 帧、无镜像、无 pending，且删除本 run thread。"""
+    deleted: list[str] = []
+
+    async def _fake_delete(thread_id: str):
+        deleted.append(thread_id)
+
+    monkeypatch.setattr(agent_module, "get_checkpointer",
+                        lambda: types.SimpleNamespace(adelete_thread=_fake_delete))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: BrokenAgent())
+
+    frames = await _collect_stream("你好", session_id="s1", user_id="u1")
+    events = _parse_frames(frames)
+    errors = [e for e in events if e["type"] == "error"]
+    assert len(errors) == 1
+    assert "代理内部异常" in errors[0]["content"]
+    assert events[-1]["type"] == "done"
+
+    async with patched_db() as db:
+        msgs = (await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == "s1"))).scalars().all()
+        sess = (await db.execute(
+            select(ChatSession).where(ChatSession.id == "s1"))).scalar_one_or_none()
+    assert msgs == []
+    assert sess is None or sess.pending_run_id is None
+    assert len(deleted) == 1  # run_id 由函数内生成，断言恰删一次
+
+
+async def test_resume_error_keeps_pending_and_thread(
+    monkeypatch, patched_db, fresh_session_manager
+):
+    """resume 跑抛错：发 error 帧、镜像不动、pending 保留原 run_id、不删 thread。"""
+    deleted: list[str] = []
+
+    async def _fake_delete(thread_id: str):
+        deleted.append(thread_id)
+
+    monkeypatch.setattr(agent_module, "get_checkpointer",
+                        lambda: types.SimpleNamespace(adelete_thread=_fake_delete))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: BrokenAgent())
+    async with patched_db() as db:
+        db.add(ChatSession(id="s1", user_id="u1", pending_run_id="run-1"))
+        await db.commit()
+
+    frames = []
+    async for f in get_agent_resume_stream_response(
+        session_id="s1", user_id="u1", run_id="run-1",
+        decisions=[{"type": "approve"}],
+    ):
+        frames.append(f)
+    events = _parse_frames(frames)
+    errors = [e for e in events if e["type"] == "error"]
+    assert len(errors) == 1
+    assert "代理内部异常" in errors[0]["content"]
+
+    async with patched_db() as db:
+        msgs = (await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == "s1"))).scalars().all()
+        sess = (await db.execute(
+            select(ChatSession).where(ChatSession.id == "s1"))).scalar_one()
+    assert msgs == []
+    assert sess.pending_run_id == "run-1"
+    assert deleted == []
+
+
+# ---------------------------------------------------------------------------
+# Fix wave：Finding 2——同会话并发锁
+# ---------------------------------------------------------------------------
+def test_session_lock_identity():
+    """同 (user, session) 返回同一锁；不同 session/不同 user 返回不同锁。"""
+    assert _get_session_lock("lock-u", "lock-s1") is _get_session_lock("lock-u", "lock-s1")
+    assert _get_session_lock("lock-u", "lock-s1") is not _get_session_lock("lock-u", "lock-s2")
+    assert _get_session_lock("lock-u", "lock-s1") is not _get_session_lock("lock-u2", "lock-s1")
+
+
+async def test_stream_same_session_serialized(monkeypatch, patched_db, fresh_session_manager):
+    """同会话两路并发首跑必须串行（起止标记不交错），以事件门控保证确定性。"""
+    markers: list[str] = []
+    release = asyncio.Event()
+    started = asyncio.Event()
+    counter = {"n": 0}
+
+    class SlowAgent(FakeAgent):
+        def __init__(self, idx: int):
+            super().__init__(events=[])
+            self.idx = idx
+
+        async def astream_events(self, inputs, version="v2", config=None):
+            self.inputs.append(inputs)
+            markers.append(f"start-{self.idx}")
+            started.set()
+            await release.wait()
+            markers.append(f"end-{self.idx}")
+            yield {
+                "event": "on_chat_model_stream",
+                "name": "FakeChatModel",
+                "data": {"chunk": AIMessage(content=f"R{self.idx}")},
+            }
+
+    def _factory(**kwargs):
+        counter["n"] += 1
+        return SlowAgent(counter["n"])
+
+    async def _noop_delete(thread_id: str):
+        return None
+
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", _factory)
+    monkeypatch.setattr(agent_module, "get_checkpointer",
+                        lambda: types.SimpleNamespace(adelete_thread=_noop_delete))
+
+    async def _collect(query: str):
+        return [f async for f in get_agent_stream_response(
+            query, session_id="s-serial-1", user_id="u-serial-1")]
+
+    t1 = asyncio.create_task(_collect("Q1"))
+    t2 = asyncio.create_task(_collect("Q2"))
+    # 等第一路真正起跑（事件门控，确定性）；再让出调度使第二路走完“尝试拿锁→阻塞”路径。
+    await started.wait()
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert len([m for m in markers if m.startswith("start-")]) == 1
+    release.set()
+    r1, r2 = await asyncio.gather(t1, t2)
+
+    assert len(markers) == 4
+    assert markers[0].startswith("start-") and markers[1].startswith("end-")
+    assert markers[2].startswith("start-") and markers[3].startswith("end-")
+    assert markers[0].split("-")[1] == markers[1].split("-")[1]
+    assert markers[2].split("-")[1] == markers[3].split("-")[1]
+    for frames in (r1, r2):
+        assert _parse_frames(frames)[-1]["type"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Fix wave：Finding 3——非流式 get_agent_response 的中断信号
+# ---------------------------------------------------------------------------
+async def test_get_agent_response_interrupt_signal(monkeypatch):
+    """白名单中断经非流式路径：interrupted/run_id 结构化信号，不删 thread，不抛错。"""
+    deleted: list[str] = []
+
+    async def _fake_delete(thread_id: str):
+        deleted.append(thread_id)
+
+    agent = InterruptingAgent(messages=[AIMessage(content="")])
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: agent)
+    monkeypatch.setattr(agent_module, "get_checkpointer",
+                        lambda: types.SimpleNamespace(adelete_thread=_fake_delete))
+
+    result = await get_agent_response("帮我记个笔记", user_id="u1")
+    assert result["interrupted"] is True
+    assert result["run_id"]
+    assert deleted == []
+    assert "审批" in result["response"]
+    assert "resume" in result["response"]
+
+
+async def test_get_agent_response_normal_still_cleans(monkeypatch):
+    """非中断路径不变：正常答复、删除一次性 thread、interrupted 为 falsy。"""
+    deleted: list[str] = []
+
+    async def _fake_delete(thread_id: str):
+        deleted.append(thread_id)
+
+    fake = FakeAgent(messages=[AIMessage(content="答复")])
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", lambda **kw: fake)
+    monkeypatch.setattr(agent_module, "get_checkpointer",
+                        lambda: types.SimpleNamespace(adelete_thread=_fake_delete))
+
+    result = await get_agent_response("你好", user_id="u1")
+    assert result["response"] == "答复"
+    assert not result.get("interrupted")
+    assert len(deleted) == 1

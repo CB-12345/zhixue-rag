@@ -1,0 +1,6 @@
+# 注意：此文件已不再使用，模型配置已迁移到 .env 文件
+# 请在 .env 文件中配置以下变量：
+# - CHAT_MODEL_NAME: 阿里云聊天模型名称
+# - OLLAMA_CHAT_MODEL_NAME: Ollama聊天模型名称  
+# - TEXT_EMBEDDING_MODEL_NAME: 嵌入模型名称
+# - RERANKER_MODEL_NAME: 重排序模型名称
