@@ -56,6 +56,13 @@ async def _migrate_columns(conn):
             if table.name not in existing_tables:
                 continue
             existing_cols = {c["name"] for c in inspector.get_columns(table.name)}
+            if table.name == "graph_docs" and sync_conn.dialect.name == "mysql":
+                # 内容 MD5 可以跨用户相同；仅调整主键，保留已有 id、图片路径与所有数据。
+                primary = inspector.get_pk_constraint(table.name)["constrained_columns"]
+                if primary == ["id"]:
+                    sync_conn.execute(text(
+                        "ALTER TABLE graph_docs DROP PRIMARY KEY, ADD PRIMARY KEY (id, user_id)"))
+                    logger.info("[migrate] graph_docs 主键升级为 (id, user_id)")
             for col in table.columns:
                 if col.name not in existing_cols:
                     ddl = _get_mysql_type_ddl(col)
@@ -66,6 +73,12 @@ async def _migrate_columns(conn):
                     sql = f"ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}{nullable}{default}"
                     logger.info(f"[migrate] {sql}")
                     sync_conn.execute(text(sql))
+            if table.name == "graph_build_tasks" and "index_status" not in existing_cols:
+                # 旧版 completed 已包含基础索引；保留成果。其余旧任务先补索引再做图谱。
+                sync_conn.execute(text(
+                    "UPDATE graph_build_tasks SET "
+                    "index_status = CASE WHEN status='completed' THEN 'completed' ELSE 'pending' END, "
+                    "indexed_hash = CASE WHEN status='completed' THEN content_hash ELSE NULL END"))
     await conn.run_sync(_check)
 
 

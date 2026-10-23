@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import os
 import tempfile
 import time
@@ -86,53 +87,26 @@ def _sync_slice_file(file_content: bytes, filename: str, file_index: int, user_i
 class KnowledgeService:
     """知识库管理服务"""
 
+    async def consume_upload(self, files: list[UploadFile], user_id: str, progress_callback=None):
+        """普通接口与流式接口共用一条登记管线，失败不再返回成功。"""
+        errors = []
+        async for event in self.handle_add_vector_multiple_stream(files, user_id):
+            data = json.loads(event.split("data: ", 1)[1])
+            if progress_callback:
+                await progress_callback(data)
+            if data["event_type"] == "error":
+                errors.append(data)
+        if errors:
+            error = errors[0]
+            raise HTTPException(error.get("status_code", 400), error.get("error_message", "上传失败"))
+
     async def handle_add_vector_single(self, file: UploadFile, user_id: str) -> str:
-        """处理添加单个向量逻辑"""
-        store = VectorStoreService()
-
-        if file.size > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail="文件大小不能超过20MB")
-
-        content = await file.read()
-        await file.seek(0)
-
-        mime = magic.Magic(mime=True)
-        file_type = mime.from_buffer(content)
-
-        file_extension = os.path.splitext(file.filename)[1].lower()
-
-        if file_type not in ALLOWED_MIME_TYPES and file_extension not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"文件类型不支持，目前支持PDF、TXT、Markdown、PPTX、DOCX文件类型。检测到的文件类型: {file_type}，扩展名: {file_extension}"
-            )
-
-        await store.get_document(files=[file], user_id=user_id)
+        await self.consume_upload([file], user_id)
         return file.filename
 
     async def handle_add_vector_multiple(self, files: list[UploadFile], user_id: str) -> list[str]:
-        """处理添加多个向量逻辑"""
-        total_size = 0
-        for file in files:
-            total_size += file.size or 0
-
-        if total_size > MAX_FOLDER_SIZE:
-            raise HTTPException(status_code=400, detail="文件总大小不能超过200MB")
-
-        start_time = time.time()
-        results = []
-        for file in files:
-            try:
-                await self.handle_add_vector_single(file, user_id)
-                results.append(file.filename)
-            except Exception as e:
-                logger.error(f"【添加向量】处理文件 {file.filename} 时出错: {e}")
-                raise
-
-        end_time = time.time()
-        logger.info(f"【添加向量】耗时: {end_time - start_time:.2f}秒，处理文件数: {len(results)}")
-
-        return results
+        await self.consume_upload(files, user_id)
+        return [file.filename for file in files]
 
     def _yield_start_event(self, total_files: int) -> str:
         """SSE 事件：开始处理，通知前端文件总数"""
@@ -184,24 +158,27 @@ class KnowledgeService:
             slice_success_count=state.slice_success_count
         ).to_sse()
 
-    def _yield_completed_event(self, result: SliceResult, state: ProcessingState) -> str:
-        """SSE 事件：单个文件全部处理完成（切片+写入成功）"""
+    def _yield_completed_event(self, result: SliceResult, state: ProcessingState, queued: bool = True) -> str:
+        """上传登记成功；可检索状态仍由后台索引任务决定。"""
         return SSEEvent(
             event_type='completed', file_index=result.file_index,
             total_files=state.total_files, filename=result.filename,
-            step='completed', message=f'文件 {result.filename} 处理完成',
+            step='queued' if queued else 'existing',
+            message=f'文件 {result.filename} 已接收，正在后台建立索引' if queued else f'文件 {result.filename} 已存在，复用已有处理状态',
             progress=state.current_progress(),
             success_count=state.success_count, failed_count=state.failed_count,
             slice_success_count=state.slice_success_count
         ).to_sse()
 
-    def _yield_write_error_event(self, result: SliceResult, state: ProcessingState, error: str) -> str:
+    def _yield_write_error_event(self, result: SliceResult, state: ProcessingState, error: str,
+                                status_code: int = 503) -> str:
         """SSE 事件：切片结果写入向量数据库时发生异常"""
         return SSEEvent(
             event_type='error', file_index=result.file_index,
             total_files=state.total_files, filename=result.filename,
             step='writing', message=f'文件 {result.filename} 写入失败',
             error_message=error,
+            status_code=status_code,
             progress=state.current_progress(),
             success_count=state.success_count, failed_count=state.failed_count,
             slice_success_count=state.slice_success_count
@@ -262,7 +239,15 @@ class KnowledgeService:
             file_type = mime.from_buffer(content)
             file_extension = os.path.splitext(file.filename)[1].lower()
 
-            if file_type not in ALLOWED_MIME_TYPES and file_extension not in ALLOWED_EXTENSIONS:
+            if not content or len(content) > MAX_FILE_SIZE:
+                failed_count += 1
+                error_events.append(SSEEvent(
+                    event_type='error', file_index=current_index, total_files=total_files,
+                    filename=file.filename, step='validation',
+                    message=f'文件 {file.filename} 校验失败',
+                    error_message='文件不能为空且单个文件不能超过20MB', failed_count=failed_count,
+                ).to_sse())
+            elif file_type not in ALLOWED_MIME_TYPES and file_extension not in ALLOWED_EXTENSIONS:
                 failed_count += 1
                 error_events.append(self._yield_validation_error_event(
                     current_index, total_files, file.filename,
@@ -284,7 +269,8 @@ class KnowledgeService:
         self, valid_files: list[dict], user_id: str
     ) -> tuple[TaskQueue, ThreadPoolExecutor, list]:
         """启动多线程切片，返回 (队列, 执行器, future列表)"""
-        queue = TaskQueue(maxsize=10)
+        # 每个文件最多产生一个结果，保证客户端断开后解析线程也能正常退出。
+        queue = TaskQueue(maxsize=len(valid_files))
         queue.set_total_count(len(valid_files))
 
         slice_tasks = [
@@ -320,35 +306,36 @@ class KnowledgeService:
                     try:
                         yield self._yield_writing_event(result, state)
 
-                        await store.save_md5_hex(result.md5, result.filename, result.filename, user_id)
-
-                        # 知识库文档入图谱：入库成功后入队构建任务（携带预切切片，保留页码/图片元数据；
-                        # 懒加载避免循环依赖；失败不影响上传主流程）
-                        try:
-                            from app.graph.services.graph_service import maybe_schedule_doc_extraction
-                            full_text = "\n".join(d.page_content for d in result.documents)
-                            graph_chunks = [
-                                {"chunk_index": i, "text": d.page_content,
-                                 "page": d.metadata.get("page"),
-                                 "image_paths": d.metadata.get("image_paths") or []}
-                                for i, d in enumerate(result.documents)]
-                            asyncio.create_task(
-                                maybe_schedule_doc_extraction(user_id, result.md5, result.filename,
-                                                              full_text, chunks=graph_chunks))
-                        except Exception as e:
-                            logger.error(f"触发文档图谱抽取失败 filename={result.filename}: {e}")
+                        from app.graph.services.graph_service import register_document_upload
+                        full_text = "\n".join(d.page_content for d in result.documents)
+                        chunks = [
+                            {"chunk_index": i, "text": d.page_content,
+                             "page": d.metadata.get("page"),
+                             "image_paths": d.metadata.get("image_paths") or []}
+                            for i, d in enumerate(result.documents)]
+                        queued = await register_document_upload(
+                            user_id, result.md5, result.filename, full_text, chunks)
+                        # SQL 注册行和持久化任务是唯一事实来源，旧 MD5 文件仅做兼容记录。
+                        if queued:
+                            try:
+                                if not await store.check_md5_hex(result.md5, user_id):
+                                    await store.save_md5_hex(result.md5, result.filename, result.filename, user_id)
+                            except Exception as exc:
+                                logger.warning(f"文档已登记，兼容 MD5 记录写入失败: {exc}")
 
                         state.success_count += 1
                         state.written_count += 1
 
-                        yield self._yield_completed_event(result, state)
+                        yield self._yield_completed_event(result, state, queued)
                         logger.info(f"【SSE上传】文件 {result.filename} 写入完成")
 
                     except Exception as e:
                         state.written_count += 1
                         state.failed_count += 1
                         logger.error(f"【SSE上传】写入文件 {result.filename} 时出错: {e}")
-                        yield self._yield_write_error_event(result, state, str(e))
+                        message = e.detail if isinstance(e, HTTPException) else "文档处理任务登记失败，请重新上传"
+                        yield self._yield_write_error_event(
+                            result, state, message, e.status_code if isinstance(e, HTTPException) else 503)
 
                 else:
                     state.written_count += 1
@@ -381,12 +368,14 @@ class KnowledgeService:
 
         if not valid_files:
             logger.info("【SSE上传】无有效文件可处理")
+            yield self._yield_finish_event(time.time(), total_files, 0, total_files)
             return
 
         start_time = time.time()
         state = ProcessingState(
             total_files=total_files,
-            total_valid=len(valid_files)
+            total_valid=len(valid_files),
+            failed_count=len(error_events),
         )
 
         # 多线程切片
@@ -394,11 +383,12 @@ class KnowledgeService:
 
         # 串行消费 + 写入
         store = VectorStoreService()
-        async for sse in self._process_slice_results(queue, len(valid_files), store, state, user_id):
-            yield sse
-
-        # shutdown(wait=True) 会阻塞事件循环线程，切片任务在此处必已全部完成，移到线程等待
-        await asyncio.to_thread(executor.shutdown, True)
+        try:
+            async for sse in self._process_slice_results(queue, len(valid_files), store, state, user_id):
+                yield sse
+        finally:
+            # 客户端中断也释放线程池；未消费的解析结果不登记，不算上传成功。
+            await asyncio.to_thread(executor.shutdown, True)
 
         logger.info(
             f"【SSE上传】文件处理完成，总数: {total_files}，"

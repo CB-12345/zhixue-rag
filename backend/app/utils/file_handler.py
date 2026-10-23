@@ -4,6 +4,9 @@ import os
 import sys
 
 import aiofiles
+from docx import Document as WordDocument
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
@@ -94,7 +97,7 @@ async def pdf_loader(file_path: str, password: str = None) -> list[Document]:
 
     if password:
         loader = PyPDFLoader(abs_file_path, password=password)
-        return await asyncio.to_thread(loader.load)
+        return _one_based_pdf_pages(await asyncio.to_thread(loader.load))
 
     try:
         loader = UnstructuredPDFLoader(abs_file_path)
@@ -105,7 +108,7 @@ async def pdf_loader(file_path: str, password: str = None) -> list[Document]:
         logger.warning(f"【PDF加载】UnstructuredPDFLoader失败，尝试PyPDFLoader: {e}")
 
     loader = PyPDFLoader(abs_file_path)
-    return await asyncio.to_thread(loader.load)
+    return _one_based_pdf_pages(await asyncio.to_thread(loader.load))
 
 
 async def txt_loader(file_path: str) -> list[Document]:
@@ -130,18 +133,8 @@ async def txt_loader(file_path: str) -> list[Document]:
     return []
 
 async def word_loader(file_path: str) -> list[Document]:
-    """
-    加载WORD文件内容
-    :param file_path: WORD文件路径
-    :return: WORD文件内容
-    """
-    abs_file_path = get_abstract_path(file_path) if not os.path.isabs(file_path) else file_path
-    try:
-        loader = TextLoader(abs_file_path, encoding='utf-8')
-        return await asyncio.to_thread(loader.load)
-    except Exception as e:
-        logger.error(f"【WORD文件加载】加载文件 {abs_file_path} 时出错: {e}")
-        return []
+    """在线程中解析 DOCX，避免压缩包/XML 解析阻塞事件循环。"""
+    return await asyncio.to_thread(word_loader_sync, file_path)
 
 async def markdown_loader(file_path: str) -> list[Document]:
     """
@@ -204,6 +197,15 @@ def get_file_md5_hex_sync(file_path: str) -> str:
     return md5_object.hexdigest()
 
 
+def _one_based_pdf_pages(documents: list[Document]) -> list[Document]:
+    """PyPDFLoader 的 page 为0起始，转换为与多模态加载器一致的物理页码。"""
+    for document in documents:
+        page = document.metadata.get("page")
+        if type(page) is int and page >= 0:
+            document.metadata["page"] = page + 1
+    return documents
+
+
 def pdf_loader_sync(file_path: str, password: str = None) -> list[Document]:
     """
     同步加载PDF文件内容（用于多线程场景，支持包含图片和文字的混合PDF）
@@ -215,7 +217,7 @@ def pdf_loader_sync(file_path: str, password: str = None) -> list[Document]:
 
     if password:
         loader = PyPDFLoader(abs_file_path, password=password)
-        return loader.load()
+        return _one_based_pdf_pages(loader.load())
 
     try:
         loader = UnstructuredPDFLoader(abs_file_path)
@@ -226,7 +228,7 @@ def pdf_loader_sync(file_path: str, password: str = None) -> list[Document]:
         logger.warning(f"【PDF加载】UnstructuredPDFLoader失败，尝试PyPDFLoader: {e}")
 
     loader = PyPDFLoader(abs_file_path)
-    return loader.load()
+    return _one_based_pdf_pages(loader.load())
 
 
 def txt_loader_sync(file_path: str) -> list[Document]:
@@ -249,15 +251,32 @@ def txt_loader_sync(file_path: str) -> list[Document]:
 
 
 def word_loader_sync(file_path: str) -> list[Document]:
-    """
-    同步加载WORD文件内容（用于多线程场景）
-    :param file_path: WORD文件路径
-    :return: WORD文件内容
-    """
+    """按正文顺序提取 DOCX 标题、段落与表格；不推测排版页码。"""
     abs_file_path = get_abstract_path(file_path) if not os.path.isabs(file_path) else file_path
     try:
-        loader = TextLoader(abs_file_path, encoding='utf-8')
-        return loader.load()
+        word = WordDocument(abs_file_path)
+        blocks = []
+        for block in word.iter_inner_content():
+            if isinstance(block, Paragraph):
+                text = block.text.strip()
+                if not text:
+                    continue
+                style_name = block.style.name if block.style else ""
+                if style_name.startswith("Heading "):
+                    level = style_name.removeprefix("Heading ")
+                    if level.isdigit() and 1 <= int(level) <= 6:
+                        text = f"{'#' * int(level)} {text}"
+                blocks.append(text)
+            elif isinstance(block, Table):
+                rows = [[cell.text.strip().replace("|", "\\|").replace("\n", "<br>")
+                         for cell in row.cells] for row in block.rows]
+                if not rows or not any(cell for row in rows for cell in row):
+                    continue
+                lines = ["| " + " | ".join(row) + " |" for row in rows]
+                lines.insert(1, "| " + " | ".join("---" for _ in rows[0]) + " |")
+                blocks.append("\n".join(lines))
+        content = "\n\n".join(blocks)
+        return [Document(page_content=content, metadata={"source": abs_file_path})] if content else []
     except Exception as e:
         logger.error(f"【WORD文件加载】加载文件 {abs_file_path} 时出错: {e}")
         return []

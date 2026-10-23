@@ -129,6 +129,7 @@ class ChunkHit(BaseModel):
     source_id: str  # 笔记 UUID 或文档 md5
     source_name: str | None = None  # 笔记标题或文档文件名
     chunk_index: int = 0
+    page: int | None = None  # PDF 物理页码从1开始；无可靠页码时为空
     text: str
     score: float | None = None  # RRF 融合分（图扩展路径可能为 None）
     metadata: dict = Field(default_factory=dict)  # vector_score/fulltext_score 等

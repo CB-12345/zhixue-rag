@@ -5,46 +5,46 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        heading: ['Noto Serif SC', 'Songti SC', 'serif'],
-        body: ['Noto Sans SC', 'PingFang SC', 'SF Pro Display', 'Helvetica Neue', 'sans-serif'],
-        mono: ['JetBrains Mono', 'SF Mono', 'Consolas', 'monospace'],
+        heading: ['var(--font-heading)'],
+        body: ['var(--font-body)'],
+        mono: ['var(--font-mono)'],
       },
       colors: {
         bg: {
-          DEFAULT: '#F7F6F3',
-          secondary: '#F0EFEC',
-          tertiary: '#F0EFEC',
+          DEFAULT: 'var(--color-bg)',
+          secondary: 'var(--color-bg-secondary)',
+          tertiary: 'var(--color-bg-tertiary)',
         },
         card: {
-          DEFAULT: '#FFFFFF',
-          hover: '#F9F9F8',
+          DEFAULT: 'var(--color-card)',
+          hover: 'var(--color-card-hover)',
         },
         text: {
-          DEFAULT: '#111111',
-          secondary: '#787774',
-          tertiary: '#A09E9A',
-          placeholder: '#BFBDB9',
+          DEFAULT: 'var(--color-text)',
+          secondary: 'var(--color-text-secondary)',
+          tertiary: 'var(--color-text-tertiary)',
+          placeholder: 'var(--color-text-placeholder)',
         },
         border: {
-          DEFAULT: '#EAEAEA',
-          light: '#F0F0EE',
+          DEFAULT: 'var(--color-border)',
+          light: 'var(--color-border-light)',
         },
-        divider: '#EEEEEC',
+        divider: 'var(--color-divider)',
         accent: {
-          DEFAULT: '#1F6C9F',
-          bg: '#E1F3FE',
+          DEFAULT: 'var(--color-accent)',
+          bg: 'var(--color-accent-bg)',
         },
         success: {
-          DEFAULT: '#346538',
-          bg: '#EDF3EC',
+          DEFAULT: 'var(--color-success)',
+          bg: 'var(--color-success-bg)',
         },
         danger: {
-          DEFAULT: '#9F2F2D',
-          bg: '#FDEBEC',
+          DEFAULT: 'var(--color-danger)',
+          bg: 'var(--color-danger-bg)',
         },
         warning: {
-          DEFAULT: '#956400',
-          bg: '#FBF3DB',
+          DEFAULT: 'var(--color-warning)',
+          bg: 'var(--color-warning-bg)',
         },
       },
       spacing: {
@@ -57,9 +57,9 @@ export default {
         '3xl': '64px',
       },
       borderRadius: {
-        sm: '4px',
-        md: '8px',
-        lg: '12px',
+        sm: 'var(--radius-sm)',
+        md: 'var(--radius-md)',
+        lg: 'var(--radius-lg)',
       },
       lineHeight: {
         tight: '1.3',

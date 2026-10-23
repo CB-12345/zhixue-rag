@@ -1,4 +1,4 @@
-"""document_handler/processor.py — DocumentProcessor 测试（loader 全部打桩）。"""
+"""DocumentProcessor：分发与切片测试，另用真实 DOCX 验证解析链路。"""
 import pytest
 from langchain_core.documents import Document
 
@@ -8,6 +8,31 @@ from app.rag.document_handler.processor import DocumentProcessor
 
 def _processor():
     return DocumentProcessor(md5_store=object())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_real_docx_is_loaded_and_split_with_table_content(tmp_path, asynchronous):
+    from docx import Document as WordDocument
+
+    path = tmp_path / "rag-learning.docx"
+    document = WordDocument()
+    document.add_heading("RAG 学习记录", level=1)
+    document.add_paragraph("混合检索结合语义与关键词。" * 140)
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text, table.cell(0, 1).text = "编号", "负责人"
+    table.cell(1, 0).text, table.cell(1, 1).text = "DOCX-4096", "林知夏"
+    document.save(path)
+    processor = _processor()
+
+    docs = (await processor.get_file_document(str(path)) if asynchronous
+            else processor.get_file_document_sync(str(path)))
+    chunks = (await processor.spliter.split_documents(docs) if asynchronous
+              else processor.split_documents_sync(docs))
+
+    assert len(chunks) > 1
+    assert all(chunk.metadata["source"] == str(path) for chunk in chunks)
+    assert any("DOCX-4096" in chunk.page_content and "林知夏" in chunk.page_content
+               for chunk in chunks)
 
 
 async def _async_loader(path, *args, **kwargs):

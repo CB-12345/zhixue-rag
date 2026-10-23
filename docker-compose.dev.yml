@@ -1,0 +1,17 @@
+# 可选：后端源码自动重载。依赖仍使用已构建镜像中的系统 Python 环境。
+# docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d backend
+services:
+  backend:
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/main.py:/app/main.py:ro
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /app/app

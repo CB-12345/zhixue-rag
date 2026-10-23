@@ -1,14 +1,14 @@
 """Unit tests for app.utils.file_handler helpers and loaders.
 
-Real file I/O is limited to tmp_path fixtures; anything touching external
-document parsers (PDF/PPTX) is only exercised on error/empty paths so the
-tests stay dependency-light and offline-friendly.
+Real files are limited to tmp_path fixtures, including valid DOCX packages.
+PDF/PPTX parsers are only exercised on error/empty paths.
 """
 import hashlib
 import io
 import os
 
 import pytest
+from docx import Document as WordDocument
 
 from app.utils.file_handler import (
     FontBBoxStreamFilter,
@@ -136,6 +136,52 @@ def test_txt_loader_sync_missing_file_returns_empty(tmp_path):
 
 async def test_txt_loader_async_missing_file_returns_empty(tmp_path):
     assert await txt_loader(str(tmp_path / "nope.txt")) == []
+
+
+# ---------------------------------------------------------------------------
+# Word: real documents, including headings, tables, empty/corrupt packages
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_word_loader_reads_chinese_headings_paragraphs_and_tables(tmp_path, asynchronous):
+    path = tmp_path / "学习资料.docx"
+    document = WordDocument()
+    document.add_heading("混合检索学习计划", level=1)
+    document.add_paragraph("先学习向量检索，再比较全文检索。")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "实验编号"
+    table.cell(0, 1).text = "负责人"
+    table.cell(1, 0).text = "HYB-2048"
+    table.cell(1, 1).text = "周予安"
+    document.add_paragraph("表格之后：每周二晚复习。")
+    document.save(path)
+
+    docs = await word_loader(str(path)) if asynchronous else word_loader_sync(str(path))
+
+    assert len(docs) == 1
+    text = docs[0].page_content
+    assert "# 混合检索学习计划" in text
+    assert "先学习向量检索，再比较全文检索。" in text
+    assert "| 实验编号 | 负责人 |" in text
+    assert "| HYB-2048 | 周予安 |" in text
+    assert text.index("先学习") < text.index("实验编号") < text.index("表格之后")
+    assert docs[0].metadata["source"] == str(path)
+    assert "page" not in docs[0].metadata  # DOCX 没有稳定的排版页码
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_word_loader_empty_document_returns_empty(tmp_path, asynchronous):
+    path = tmp_path / "empty.docx"
+    WordDocument().save(path)
+    docs = await word_loader(str(path)) if asynchronous else word_loader_sync(str(path))
+    assert docs == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_word_loader_rejects_plain_text_disguised_as_docx(tmp_path, asynchronous):
+    path = tmp_path / "corrupt.docx"
+    path.write_text("这只是文本，不是有效的 Word 文件。", encoding="utf-8")
+    docs = await word_loader(str(path)) if asynchronous else word_loader_sync(str(path))
+    assert docs == []
 
 
 # ---------------------------------------------------------------------------

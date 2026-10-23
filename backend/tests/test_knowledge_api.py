@@ -87,7 +87,7 @@ async def test_add_single(client, monkeypatch):
         headers={"Authorization": "Bearer x"},
     )
     assert resp.status_code == 200
-    assert "a.txt 已成功上传" in resp.json()["message"]
+    assert "a.txt 已接收" in resp.json()["message"]
     assert service.calls == [("single", "a.txt")]
 
 

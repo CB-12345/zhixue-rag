@@ -135,7 +135,7 @@ export default function CategoryManageDialog({
           <button
             onClick={handleCreate}
             disabled={!newCategory.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-[var(--color-accent)] text-white disabled:opacity-40 transition-opacity"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-[var(--color-action)] text-white disabled:opacity-40 transition-opacity"
           >
             <Plus size={14} />
             新建

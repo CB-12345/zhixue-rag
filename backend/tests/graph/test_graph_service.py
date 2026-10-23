@@ -54,6 +54,12 @@ async def test_maybe_schedule_extraction_triggers_once(db_session, session_facto
     assert await maybe_schedule_extraction("n1", "u1", "标题", "v1") is True
 
     # worker 消费：hash 与已有成功日志一致 → 跳过抽取，任务直接完成
+    # 本组只验证图谱阶段；基础索引由独立测试覆盖。
+    from sqlalchemy import update
+    async with session_factory() as index_db:
+        await index_db.execute(update(GraphBuildTask).values(
+            index_status="completed", indexed_hash=GraphBuildTask.content_hash))
+        await index_db.commit()
     assert await _tick() is True
     await db_session.rollback()  # 结束本会话快照，读取其他会话的提交
     task = (await db_session.execute(
@@ -65,6 +71,12 @@ async def test_maybe_schedule_extraction_triggers_once(db_session, session_facto
 
     # 内容变化 → 重新入队，worker 消费后重新抽取
     assert await maybe_schedule_extraction("n1", "u1", "标题", "v2") is True
+    # 本组只验证图谱阶段；基础索引由独立测试覆盖。
+    from sqlalchemy import update
+    async with session_factory() as index_db:
+        await index_db.execute(update(GraphBuildTask).values(
+            index_status="completed", indexed_hash=GraphBuildTask.content_hash))
+        await index_db.commit()
     assert await _tick() is True
     await db_session.rollback()
     log = (await db_session.execute(
@@ -88,6 +100,12 @@ async def test_maybe_schedule_doc_extraction_skips_same_hash(db_session, session
     assert doc is not None and doc.filename == "报告.pdf"
 
     # worker 消费：hash 一致 → 跳过抽取，任务完成且日志保持原样
+    # 本组只验证图谱阶段；基础索引由独立测试覆盖。
+    from sqlalchemy import update
+    async with session_factory() as index_db:
+        await index_db.execute(update(GraphBuildTask).values(
+            index_status="completed", indexed_hash=GraphBuildTask.content_hash))
+        await index_db.commit()
     assert await _tick() is True
     task = (await db_session.execute(
         select(GraphBuildTask).where(GraphBuildTask.source_id == "md51"))).scalar_one()

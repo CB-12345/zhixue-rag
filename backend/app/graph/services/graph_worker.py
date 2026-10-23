@@ -1,4 +1,4 @@
-"""图谱构建 worker：应用内 asyncio 循环，轮询消费 graph_build_tasks 任务表。
+"""来源构建 worker：基础索引与图谱通过独立 asyncio 循环消费同一任务表。
 
 - 启动恢复：把上次进程遗留的 running 任务拨回 pending（单实例部署无并发认领者，
   进程认领后崩溃不至于永久卡死）；
@@ -26,15 +26,25 @@ async def recover_stale_tasks() -> int:
     from app.graph.services import graph_service
 
     async with graph_service.AsyncSessionLocal() as db:
-        result = await db.execute(
-            update(GraphBuildTask)
-            .where(GraphBuildTask.status == "running")
-            .values(status="pending", run_token=None))
+        recovered = 0
+        for stage in ("index", "graph"):
+            status, token = _stage_columns(stage)
+            result = await db.execute(update(GraphBuildTask).where(status == "running")
+                                      .values({status: "pending", token: None}))
+            recovered += result.rowcount
         await db.commit()
-        return result.rowcount
+        return recovered
 
 
-async def _claim_next_task() -> tuple[str, str] | None:
+def _stage_columns(stage: str):
+    if stage == "index":
+        return GraphBuildTask.index_status, GraphBuildTask.index_run_token
+    if stage == "graph":
+        return GraphBuildTask.status, GraphBuildTask.run_token
+    raise ValueError(f"未知任务阶段: {stage}")
+
+
+async def _claim_next_task(stage: str = "graph") -> tuple[str, str] | None:
     """认领一条 pending 任务（置 running + 写入认领令牌），返回 (任务 id, 令牌)；无任务返回 None。
 
     会话工厂经 graph_service 模块属性访问，测试统一 monkeypatch 该入口。
@@ -42,45 +52,52 @@ async def _claim_next_task() -> tuple[str, str] | None:
     from app.graph.services import graph_service
 
     token = str(uuid.uuid4())
+    status_col, token_col = _stage_columns(stage)
+    conditions = [status_col == "pending"]
+    if stage == "graph":
+        conditions.extend([GraphBuildTask.index_status == "completed",
+                           GraphBuildTask.indexed_hash == GraphBuildTask.content_hash])
     async with graph_service.AsyncSessionLocal() as db:
         row = (await db.execute(
-            select(GraphBuildTask).where(GraphBuildTask.status == "pending")
+            select(GraphBuildTask).where(*conditions)
             .order_by(GraphBuildTask.created_at)
             .limit(1))).scalar_one_or_none()
         if row is None:
             return None
         result = await db.execute(
             update(GraphBuildTask)
-            .where(GraphBuildTask.id == row.id, GraphBuildTask.status == "pending")
-            .values(status="running", run_token=token))
+            .where(GraphBuildTask.id == row.id, *conditions)
+            .values({status_col: "running", token_col: token}))
         await db.commit()
         return (row.id, token) if result.rowcount else None
 
 
-async def _tick() -> bool:
+async def _tick(stage: str = "graph") -> bool:
     """处理一条任务；队列空返回 False（调用方据此休眠）。
 
     任务执行期间被重新入队时 process_task 会校验令牌自愿中止，本层不感知。
     """
-    claimed = await _claim_next_task()
+    claimed = await _claim_next_task(stage)
     if claimed is None:
         return False
     task_id, run_token = claimed
     from app.graph.services import graph_service
 
     try:
-        await graph_service.process_task(task_id, run_token=run_token)
+        process = graph_service.process_index_task if stage == "index" else graph_service.process_task
+        await process(task_id, run_token=run_token)
     except Exception as e:
         # process_task 内部状态机之外抛出的异常：兜底回 pending 避免卡死 running；
         # 令牌条件保证不误伤重新入队后的新任务
         logger.error(f"图谱构建任务执行异常 task_id={task_id}: {e}", exc_info=True)
         try:
             async with graph_service.AsyncSessionLocal() as db:
+                status_col, token_col = _stage_columns(stage)
                 await db.execute(
                     update(GraphBuildTask)
-                    .where(GraphBuildTask.id == task_id, GraphBuildTask.status == "running",
-                           GraphBuildTask.run_token == run_token)
-                    .values(status="pending"))
+                    .where(GraphBuildTask.id == task_id, status_col == "running",
+                           token_col == run_token)
+                    .values({status_col: "pending"}))
                 await db.commit()
         except Exception as e2:
             logger.error(f"任务状态回滚失败 task_id={task_id}: {e2}")
@@ -92,10 +109,14 @@ async def run_worker_loop(stop_event: asyncio.Event) -> None:
     recovered = await recover_stale_tasks()
     if recovered:
         logger.info(f"已恢复 {recovered} 条上次进程遗留的 running 图谱构建任务")
-    logger.info("图谱构建 worker 已启动")
+    logger.info("基础索引与图谱独立 worker 已启动")
+    await asyncio.gather(_run_stage_loop(stop_event, "index"), _run_stage_loop(stop_event, "graph"))
+
+
+async def _run_stage_loop(stop_event: asyncio.Event, stage: str) -> None:
     while not stop_event.is_set():
         try:
-            processed = await _tick()
+            processed = await _tick(stage)
         except Exception as e:
             logger.error(f"图谱构建 worker 轮询异常: {e}", exc_info=True)
             processed = False

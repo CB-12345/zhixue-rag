@@ -6,13 +6,14 @@
 monkeypatch 会话工厂与假 chat/embed 模型，settings.NEO4J_URI 指向真库 →
 工厂返回 Neo4jGraphStore，验证管线完整写入图数据库。
 """
+import asyncio
 import os
 import uuid
 
 import pytest
 
 from app.core import background_init
-from app.graph.services.graph_service import _run_extraction, content_hash
+from app.graph.services.graph_service import _run_extraction, _run_indexing, content_hash
 from tests.fakes import make_fake_chat_model
 
 pytestmark = pytest.mark.skipif(
@@ -31,6 +32,99 @@ class FakeEmbed:
         v = [0.0] * DIM
         v[hash(text) % DIM] = 1.0
         return v
+
+
+async def _run_pipeline(*args, **kwargs):
+    if not await _run_indexing(*args, **kwargs):
+        return True
+    return await _run_extraction(*args, **kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_body", ["更新后只剩一片的事实。", "", " \n\t "])
+async def test_note_pipeline_removes_deleted_content_after_edits(
+        db_session, session_factory, monkeypatch, neo4j_env, _cleanup, new_body):
+    from app.graph.storage import neo4j_client
+    from app.models.note import Note
+
+    uid = "pipe-" + uuid.uuid4().hex[:8]
+    original = "原来的学习计划。" * 180 + "\n\n旧编号 OLD-9999 已作废。" * 120
+    note = Note(id="edit-note", user_id=uid, title="学习计划", content=original)
+    db_session.add(note)
+    await db_session.commit()
+    monkeypatch.setattr("app.graph.services.graph_service.AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(background_init.init_manager, "chat_model",
+                        make_fake_chat_model(['{"entities": [], "relations": []}']))
+    driver = neo4j_client.get_neo4j_driver()
+
+    assert await _run_pipeline(note.id, uid, note.title, content_hash(original))
+    rows = await driver.execute_query(
+        "MATCH (c:Chunk {user_id: $uid}) RETURN c.text AS text", {"uid": uid})
+    assert len(rows.records) > 1
+
+    note.content = new_body
+    await db_session.commit()
+    if not new_body.strip():  # 清空正文不应因模型不可用而残留旧索引。
+        monkeypatch.setattr(background_init.init_manager, "chat_model", None)
+        monkeypatch.setattr(background_init.init_manager, "embed_model", None)
+    for _ in range(2):  # 缩短/清空后重试不会恢复旧片段
+        assert await _run_pipeline(note.id, uid, note.title, content_hash(new_body))
+    rows = await driver.execute_query(
+        "MATCH (c:Chunk {user_id: $uid}) RETURN c.text AS text ORDER BY c.chunk_index", {"uid": uid})
+    assert [r["text"] for r in rows.records] == ([new_body] if new_body.strip() else [])
+
+
+@pytest.mark.asyncio
+async def test_note_edit_during_embedding_discards_old_task_before_index_write(
+        db_session, session_factory, monkeypatch, neo4j_env, _cleanup):
+    from sqlalchemy import select
+
+    from app.graph.services import graph_service
+    from app.graph.services.graph_worker import _tick
+    from app.graph.storage import neo4j_client
+    from app.models.graph import GraphBuildTask
+    from app.models.note import Note
+
+    uid = "pipe-" + uuid.uuid4().hex[:8]
+    note_id = "concurrent-edit"
+    db_session.add(Note(id=note_id, user_id=uid, title="学习计划", content="当前有效的事实"))
+    await db_session.commit()
+    monkeypatch.setattr(graph_service, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(background_init.init_manager, "chat_model",
+                        make_fake_chat_model(['{"entities": [], "relations": []}']))
+    assert await _run_pipeline(note_id, uid, "学习计划", content_hash("当前有效的事实"))
+    await graph_service.maybe_schedule_extraction(note_id, uid, "学习计划", "处理中被淘汰的事实")
+    loop = asyncio.get_running_loop()
+
+    async def edit_and_enqueue():
+        async with session_factory() as db:
+            note = await db.get(Note, note_id)
+            note.content = "用户最新保存的事实"
+            await db.commit()
+        await graph_service.maybe_schedule_extraction(note_id, uid, "学习计划", "用户最新保存的事实")
+
+    class EditingEmbed(FakeEmbed):
+        def embed_documents(self, texts):
+            asyncio.run_coroutine_threadsafe(edit_and_enqueue(), loop).result(timeout=10)
+            return super().embed_documents(texts)
+
+    monkeypatch.setattr(background_init.init_manager, "embed_model", EditingEmbed())
+    assert await _tick("index")
+    async with session_factory() as db:
+        task = (await db.execute(select(GraphBuildTask).where(
+            GraphBuildTask.user_id == uid))).scalar_one()
+        assert task.index_status == "pending"
+        assert task.content_hash == content_hash("用户最新保存的事实")
+    driver = neo4j_client.get_neo4j_driver()
+    rows = await driver.execute_query(
+        "MATCH (c:Chunk {user_id: $uid}) RETURN c.text AS text", {"uid": uid})
+    assert [r["text"] for r in rows.records] == ["当前有效的事实"]
+
+    monkeypatch.setattr(background_init.init_manager, "embed_model", FakeEmbed())
+    assert await _tick("index")
+    rows = await driver.execute_query(
+        "MATCH (c:Chunk {user_id: $uid}) RETURN c.text AS text", {"uid": uid})
+    assert [r["text"] for r in rows.records] == ["用户最新保存的事实"]
 
 
 @pytest.fixture
@@ -63,7 +157,7 @@ async def test_note_pipeline_writes_neo4j(db_session, session_factory, monkeypat
         ]))
 
     body = "知识图谱存储选型讨论，正文较长。" * 30 + " Neo4j 是图数据库。"
-    await _run_extraction("n1", uid, "图谱笔记", content_hash(body), body=body, source_type="note")
+    await _run_pipeline("n1", uid, "图谱笔记", content_hash(body), body=body, source_type="note")
 
     # MySQL 侧：抽取日志成功
     log = (await db_session.execute(
@@ -123,7 +217,7 @@ async def test_doc_pipeline_with_prechunks(db_session, session_factory, monkeypa
     body = "这是一份季度报表，包含营收数据。" * 10
     pre_chunks = [{"chunk_index": 0, "text": body[:50], "page": 1, "image_paths": ["img1.png"]},
                   {"chunk_index": 1, "text": body[50:], "page": 2, "image_paths": []}]
-    await _run_extraction("md5-x", uid, "doc.pdf", content_hash(body), body=body,
+    await _run_pipeline("md5-x", uid, "doc.pdf", content_hash(body), body=body,
                           source_type="doc", chunks=pre_chunks)
 
     log = (await db_session.execute(
@@ -161,7 +255,7 @@ async def test_note_pipeline_wiki_edges_first_match(db_session, session_factory,
         background_init.init_manager, "chat_model",
         make_fake_chat_model(['{"entities": [], "relations": []}']))
 
-    await _run_extraction("n1", uid, "我的笔记", content_hash("[[FastAPI]]"), body="[[FastAPI]]")
+    await _run_pipeline("n1", uid, "我的笔记", content_hash("[[FastAPI]]"), body="[[FastAPI]]")
 
     driver = neo4j_client.get_neo4j_driver()
     edges = await driver.execute_query(
@@ -187,7 +281,7 @@ async def test_doc_pipeline_skips_note_edges(db_session, session_factory, monkey
         make_fake_chat_model(
             ['{"entities": [{"name": "Python", "type": "tech", "mentions": ["Python"]}], "relations": []}']))
 
-    await _run_extraction("md5-doc", uid, "报告.pdf", content_hash("body"),
+    await _run_pipeline("md5-doc", uid, "报告.pdf", content_hash("body"),
                           body="用 [[FastAPI]] 与 Python", source_type="doc")
 
     driver = neo4j_client.get_neo4j_driver()
@@ -216,7 +310,7 @@ async def test_doc_pipeline_creates_missing_log_row(db_session, session_factory,
         make_fake_chat_model(
             ['{"entities": [{"name": "Python", "type": "tech", "mentions": ["Python"]}], "relations": []}']))
 
-    await _run_extraction("md5-nolog", uid, "报告.pdf", content_hash("body"),
+    await _run_pipeline("md5-nolog", uid, "报告.pdf", content_hash("body"),
                           body="用 Python 写", source_type="doc")
 
     log = (await db_session.execute(select(GraphExtractLog).where(
@@ -243,7 +337,7 @@ async def test_cleanup_note_graph_removes_graph_and_logs(db_session, session_fac
         make_fake_chat_model(
             ['{"entities": [{"name": "临时实体", "type": "concept", "mentions": ["临时实体"]}], "relations": []}']))
 
-    await _run_extraction("n-del", uid, "待删笔记", content_hash("body"), body="临时实体")
+    await _run_pipeline("n-del", uid, "待删笔记", content_hash("body"), body="临时实体")
 
     from app.graph.storage import neo4j_client
 
@@ -290,7 +384,7 @@ async def test_extraction_replaces_stale_relations_keeps_manual(db_session, sess
     await store.set_relations_from_source(uid, "doc", "md5-rel", [
         {"source_id": ea.id, "target_id": eb.id, "relation_type": "旧关系"}])
 
-    await _run_extraction("md5-rel", uid, "报告.pdf", content_hash("body"),
+    await _run_pipeline("md5-rel", uid, "报告.pdf", content_hash("body"),
                           body="A 与 B", source_type="doc")
 
     driver = neo4j_client.get_neo4j_driver()

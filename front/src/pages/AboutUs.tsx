@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { GitFork } from 'lucide-react'
+import BrandMark from '../components/common/BrandMark'
 
 export default function AboutUs() {
   const { t } = useTranslation()
@@ -9,6 +10,13 @@ export default function AboutUs() {
       <h1 className="font-heading text-xl font-semibold text-[var(--color-text)] mb-6">{t('about.title')}</h1>
 
       <div className="bg-[var(--color-card)] rounded-lg border border-[var(--color-border)] p-6 space-y-6">
+        <div className="flex items-center gap-3">
+          <BrandMark className="w-12 h-12" />
+          <div>
+            <h2 className="font-heading text-xl font-semibold text-[var(--color-text)]">{t('app.name')}</h2>
+            <p className="mt-1 text-sm text-[var(--color-accent)]">{t('app.subtitle')}</p>
+          </div>
+        </div>
         <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
           {t('about.description')}
         </p>
@@ -29,7 +37,7 @@ export default function AboutUs() {
           <ul className="space-y-2">
             {['aiChat', 'noteTaking', 'knowledgeBase', 'knowledgeGraph', 'review'].map((key) => (
               <li key={key} className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-action)]" />
                 {t(`about.featureList.${key}`)}
               </li>
             ))}

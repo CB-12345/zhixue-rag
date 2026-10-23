@@ -1,0 +1,316 @@
+{
+  "version": "zhixue-file-ingestion-v1",
+  "description": "实际 PDF/DOCX 文件流程夹具，内容自编且虚构；不是外部资料或公开质量基准。问题在首次真实回答前固定。",
+  "files": [
+    {
+      "name": "xinghe-lab-handbook.pdf",
+      "sha256": "4e0cb55e62e6e589162b9ef2ea7df76ebb3288ed7ae30a653332c7073eb58d05"
+    },
+    {
+      "name": "xinghe-course-rules.docx",
+      "sha256": "0583bc4a1454b32cbecbfbc6e33c193115627a0800d4e02f467d599f98e900a7"
+    }
+  ],
+  "questions": [
+    {
+      "id": "f01",
+      "category": "fact",
+      "query": "仅依据我的资料，EQ-724 设备的开放时段及登记、归还要求是什么？",
+      "relevant_files": [
+        "xinghe-lab-handbook.pdf"
+      ],
+      "reference_answer": "周四18:20-19:10；凭预约回执到东楼值班台登记，使用后交还钥匙。",
+      "required_terms": [
+        [
+          "周四"
+        ],
+        [
+          "18:20",
+          "18：20"
+        ],
+        [
+          "19:10",
+          "19：10"
+        ],
+        [
+          "预约回执"
+        ],
+        [
+          "东楼"
+        ],
+        [
+          "钥匙"
+        ]
+      ],
+      "required_cited_pages": {
+        "xinghe-lab-handbook.pdf": [
+          2
+        ]
+      },
+      "supporting_quotes": {
+        "xinghe-lab-handbook.pdf": [
+          "EQ-724",
+          "周四 18:20-19:10",
+          "须凭预约回执到东楼值班台登记；使用后交还钥匙。"
+        ]
+      }
+    },
+    {
+      "id": "f02",
+      "category": "fact",
+      "query": "仅依据我的资料，EQ-748 设备什么时候开放，同行人数和带离限制是什么？",
+      "relevant_files": [
+        "xinghe-lab-handbook.pdf"
+      ],
+      "reference_answer": "周五09:30-10:20；两人同行、提交小组回执，不得带离实验室。",
+      "required_terms": [
+        [
+          "周五"
+        ],
+        [
+          "09:30",
+          "09：30"
+        ],
+        [
+          "10:20",
+          "10：20"
+        ],
+        [
+          "两人",
+          "2人"
+        ],
+        [
+          "小组回执"
+        ],
+        [
+          "不得",
+          "不能",
+          "不允许"
+        ]
+      ],
+      "required_cited_pages": {
+        "xinghe-lab-handbook.pdf": [
+          3
+        ]
+      },
+      "supporting_quotes": {
+        "xinghe-lab-handbook.pdf": [
+          "EQ-748",
+          "周五 09:30-10:20",
+          "须两人同行并提交小组回执；本设备不得带离实验室。"
+        ]
+      }
+    },
+    {
+      "id": "f03",
+      "category": "fact",
+      "query": "仅依据我的资料，XH-621 设备故障与暂停政策这一章节的负责人是谁？",
+      "relevant_files": [
+        "xinghe-course-rules.docx"
+      ],
+      "reference_answer": "江予川。",
+      "required_terms": [
+        [
+          "江予川"
+        ]
+      ],
+      "required_cited_pages": {
+        "xinghe-course-rules.docx": [
+          null
+        ]
+      },
+      "supporting_quotes": {
+        "xinghe-course-rules.docx": [
+          "星河实验课程规则 XH-621",
+          "设备故障与暂停政策",
+          "此章节负责人是江予川。"
+        ]
+      }
+    },
+    {
+      "id": "f04",
+      "category": "semantic",
+      "query": "仅依据我的资料，XH-621 在什么情况下必须暂停使用设备，故障上报从哪里进入？",
+      "relevant_files": [
+        "xinghe-course-rules.docx"
+      ],
+      "reference_answer": "电源接口破损时立即暂停使用；实验室管理台的设备报修入口。",
+      "required_terms": [
+        [
+          "电源接口"
+        ],
+        [
+          "破损"
+        ],
+        [
+          "暂停"
+        ],
+        [
+          "实验室管理台"
+        ],
+        [
+          "设备报修入口"
+        ]
+      ],
+      "required_cited_pages": {
+        "xinghe-course-rules.docx": [
+          null
+        ]
+      },
+      "supporting_quotes": {
+        "xinghe-course-rules.docx": [
+          "暂停条件：发现电源接口破损时立即暂停使用。",
+          "故障上报入口：实验室管理台的设备报修入口。"
+        ]
+      }
+    },
+    {
+      "id": "f05",
+      "category": "fact",
+      "query": "仅依据我的资料，GR-866 中 REQ-022 申请的反馈时限和提交入口是什么？",
+      "relevant_files": [
+        "xinghe-course-rules.docx"
+      ],
+      "reference_answer": "36小时内；课程管理台的复查入口。",
+      "required_terms": [
+        [
+          "36"
+        ],
+        [
+          "小时"
+        ],
+        [
+          "课程管理台"
+        ],
+        [
+          "复查入口"
+        ]
+      ],
+      "required_cited_pages": {
+        "xinghe-course-rules.docx": [
+          null
+        ]
+      },
+      "supporting_quotes": {
+        "xinghe-course-rules.docx": [
+          "评分与提交 GR-866",
+          "REQ-022",
+          "36 小时内",
+          "课程管理台的复查入口"
+        ]
+      }
+    },
+    {
+      "id": "f06",
+      "category": "multi_source",
+      "query": "仅依据我的资料，分别列出 EQ-724 的开放时段，以及 GR-866 中 REQ-022 的反馈时限和提交入口。",
+      "relevant_files": [
+        "xinghe-lab-handbook.pdf",
+        "xinghe-course-rules.docx"
+      ],
+      "reference_answer": "EQ-724周四18:20-19:10；REQ-022在36小时内反馈，提交至课程管理台的复查入口。",
+      "required_terms": [
+        [
+          "周四"
+        ],
+        [
+          "18:20",
+          "18：20"
+        ],
+        [
+          "19:10",
+          "19：10"
+        ],
+        [
+          "36"
+        ],
+        [
+          "复查入口"
+        ]
+      ],
+      "required_cited_pages": {
+        "xinghe-lab-handbook.pdf": [
+          2
+        ],
+        "xinghe-course-rules.docx": [
+          null
+        ]
+      },
+      "supporting_quotes": {
+        "xinghe-lab-handbook.pdf": [
+          "EQ-724",
+          "周四 18:20-19:10"
+        ],
+        "xinghe-course-rules.docx": [
+          "REQ-022",
+          "36 小时内",
+          "课程管理台的复查入口"
+        ]
+      }
+    },
+    {
+      "id": "f07",
+      "category": "unanswerable",
+      "query": "仅依据我的资料，江予川的手机号码是多少？",
+      "relevant_files": [],
+      "reference_answer": "资料没有手机号码，应拒答。",
+      "required_terms": [],
+      "required_cited_pages": {},
+      "supporting_quotes": {}
+    },
+    {
+      "id": "f08",
+      "category": "semantic",
+      "query": "仅依据我的资料，比较 EQ-724 和 EQ-748 的开放时段及使用要求，逐项引用各自来源。",
+      "relevant_files": [
+        "xinghe-lab-handbook.pdf"
+      ],
+      "reference_answer": "EQ-724周四18:20-19:10，凭预约回执到东楼值班台登记，使用后交还钥匙；EQ-748周五09:30-10:20，须两人同行并提交小组回执，不得带离实验室。",
+      "required_terms": [
+        [
+          "18:20",
+          "18：20"
+        ],
+        [
+          "19:10",
+          "19：10"
+        ],
+        [
+          "09:30",
+          "09：30"
+        ],
+        [
+          "10:20",
+          "10：20"
+        ],
+        [
+          "东楼"
+        ],
+        [
+          "两人",
+          "2人"
+        ],
+        [
+          "钥匙"
+        ],
+        [
+          "小组回执"
+        ]
+      ],
+      "required_cited_pages": {
+        "xinghe-lab-handbook.pdf": [
+          2,
+          3
+        ]
+      },
+      "supporting_quotes": {
+        "xinghe-lab-handbook.pdf": [
+          "EQ-724",
+          "周四 18:20-19:10",
+          "EQ-748",
+          "周五 09:30-10:20"
+        ]
+      }
+    }
+  ]
+}

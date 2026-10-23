@@ -31,12 +31,12 @@ class FakeLocalRetriever:
 
 class FakeEvaluator:
     def __init__(self, result):
-        self.result = result
+        self.results = result if isinstance(result, list) else [result]
         self.calls = []
 
     async def evaluate(self, query, evidences):
         self.calls.append({"query": query, "evidences": list(evidences)})
-        return self.result
+        return self.results[min(len(self.calls) - 1, len(self.results) - 1)]
 
 
 class FakeWebSearchClient:
@@ -134,7 +134,7 @@ async def test_run_falls_back_to_web_and_keeps_local_evidence_first():
     web_evidence = _evidence("w1", "web", "Fresh web fact", "Web Result")
     planner = FakePlanner(_plan(need_retrieval=True, allow_web_fallback=True))
     local_retriever = FakeLocalRetriever([local_evidence])
-    evaluator = FakeEvaluator(_answerability(answerable=False, web_queries=["fresh agentic rag news"]))
+    evaluator = FakeEvaluator([_answerability(answerable=False, web_queries=["fresh agentic rag news"]), _answerability()])
     web_search = FakeWebSearchClient([web_evidence])
     service = AgenticRagService(
         planner=planner,
@@ -194,7 +194,7 @@ async def test_run_emits_web_searching_before_web_evidence():
     service = AgenticRagService(
         planner=FakePlanner(_plan()),
         local_retriever=FakeLocalRetriever([_evidence("n1", "note", "Local fact")]),
-        evaluator=FakeEvaluator(_answerability(answerable=False, web_queries=["web query"])),
+        evaluator=FakeEvaluator([_answerability(answerable=False, web_queries=["web query"]), _answerability()]),
         web_search_client=TrackingWebSearchClient([_evidence("w1", "web", "Web fact")]),
     )
 
@@ -214,7 +214,7 @@ async def test_run_triggers_web_when_not_answerable_even_if_plan_vetoes():
     web_evidence = _evidence("w1", "web", "Bai Juyi was a Tang dynasty poet.", "白居易")
     planner = FakePlanner(_plan(need_retrieval=True, allow_web_fallback=False))
     local_retriever = FakeLocalRetriever([local_evidence])
-    evaluator = FakeEvaluator(_answerability(answerable=False, web_queries=["白居易 唐代诗人"]))
+    evaluator = FakeEvaluator([_answerability(answerable=False, web_queries=["白居易 唐代诗人"]), _answerability()])
     web_search = FakeWebSearchClient([web_evidence])
     service = AgenticRagService(
         planner=planner,
@@ -240,7 +240,7 @@ async def test_run_emits_thinking_events_for_orchestration_stages():
 
     planner = FakePlanner(_plan(need_retrieval=True, allow_web_fallback=True))
     local_retriever = FakeLocalRetriever([_evidence("n1", "note", "Local fact", "Note")])
-    evaluator = FakeEvaluator(_answerability(answerable=False, web_queries=[]))
+    evaluator = FakeEvaluator([_answerability(answerable=False, web_queries=[]), _answerability()])
     web_search = FakeWebSearchClient([_evidence("w1", "web", "Web fact", "Web")])
     service = AgenticRagService(
         planner=planner,
@@ -258,6 +258,7 @@ async def test_run_emits_thinking_events_for_orchestration_stages():
         "answerability",
         "web_search",
         "web_search",
+        "answerability",
         "evidence_fusion",
         "context_ready",
     ]
@@ -272,3 +273,31 @@ async def test_run_emits_thinking_events_for_orchestration_stages():
     web_event = [event for event in events if event["stage"] == "web_search"][1]
     assert web_event["details"]["status"] == "evidence"
     assert web_event["details"]["results"][0]["preview"] == "Web fact"
+
+
+@pytest.mark.parametrize("query", ["只依据资料回答这个问题", "我的资料里 HYB-2048 的线上用户量是多少", "Use only the provided documents"])
+async def test_insufficient_private_evidence_is_refused_without_web_substitution(query):
+    web = FakeWebSearchClient([_evidence("w1", "web", "unrelated external fact")])
+    service = AgenticRagService(planner=FakePlanner(_plan()), local_retriever=FakeLocalRetriever([_evidence("n1", "note", "背景")]),
+                               evaluator=FakeEvaluator(_answerability(answerable=False)), web_search_client=web)
+    result = await service.run(query, "u1")
+    assert result.refusal_message and not result.context and not result.evidences
+    assert not result.used_web and web.calls == []
+
+
+async def test_web_results_are_not_assumed_to_be_sufficient():
+    evaluator = FakeEvaluator(_answerability(answerable=False))
+    service = AgenticRagService(planner=FakePlanner(_plan()), local_retriever=FakeLocalRetriever([_evidence("n1", "note", "背景")]),
+                               evaluator=evaluator, web_search_client=FakeWebSearchClient([_evidence("w1", "web", "更多无关内容")]))
+    result = await service.run("缺失的具体事实", "u1")
+    assert len(evaluator.calls) == 2 and result.used_web
+    assert result.refusal_message and not result.context and not result.evidences
+
+
+async def test_verifier_unavailable_does_not_trigger_web_or_answering():
+    unavailable = _answerability(answerable=False).model_copy(update={"status": "unavailable"})
+    web = FakeWebSearchClient()
+    service = AgenticRagService(planner=FakePlanner(_plan()), local_retriever=FakeLocalRetriever([_evidence("n1", "note", "背景")]),
+                               evaluator=FakeEvaluator(unavailable), web_search_client=web)
+    result = await service.run("具体事实", "u1")
+    assert "稍后重试" in result.refusal_message and not result.evidences and web.calls == []

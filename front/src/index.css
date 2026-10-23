@@ -1,37 +1,40 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --font-heading: 'Noto Serif SC', 'Songti SC', serif;
-  --font-body: 'Noto Sans SC', 'PingFang SC', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  --font-heading: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-body: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
-  --color-bg: #F7F6F3;
-  --color-bg-secondary: #F0EFEC;
-  --color-bg-tertiary: #F0EFEC;
+  --color-bg: #F3F8FE;
+  --color-bg-secondary: #EAF3FD;
+  --color-bg-tertiary: #DAE9F9;
+  --color-sidebar: #EDF5FF;
   --color-card: #FFFFFF;
-  --color-card-hover: #F9F9F8;
-  --color-text: #111111;
-  --color-text-secondary: #787774;
-  --color-text-tertiary: #A09E9A;
-  --color-text-placeholder: #BFBDB9;
-  --color-border: #EAEAEA;
-  --color-border-light: #F0F0EE;
-  --color-divider: #EEEEEC;
-  --color-accent: #1F6C9F;
-  --color-accent-bg: #E1F3FE;
+  --color-card-hover: #F5FAFF;
+  --color-text: #1B3553;
+  --color-text-secondary: #506781;
+  --color-text-tertiary: #536B85;
+  --color-text-placeholder: #70859C;
+  --color-border: #D2E2F3;
+  --color-border-light: #E5EEF8;
+  --color-divider: #E1EBF6;
+  --color-accent: #2868B2;
+  --color-accent-bg: #E2EFFF;
+  --color-action: #2868B2;
+  --color-action-hover: #205795;
   --color-success: #346538;
   --color-success-bg: #EDF3EC;
   --color-danger: #9F2F2D;
   --color-danger-bg: #FDEBEC;
   --color-warning: #956400;
   --color-warning-bg: #FBF3DB;
-  --color-shadow: rgba(0, 0, 0, 0.04);
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --color-shadow: rgba(38, 87, 145, 0.07);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
@@ -45,20 +48,23 @@
 }
 
 .dark {
-  --color-bg: #1A1A1A;
-  --color-bg-secondary: #232323;
-  --color-bg-tertiary: #2A2A2A;
-  --color-card: #2A2A2A;
-  --color-card-hover: #323232;
-  --color-text: #E8E8E8;
-  --color-text-secondary: #A0A0A0;
-  --color-text-tertiary: #707070;
-  --color-text-placeholder: #505050;
-  --color-border: #3A3A3A;
-  --color-border-light: #333333;
-  --color-divider: #333333;
-  --color-accent: #4A9ED6;
-  --color-accent-bg: #1A2E3E;
+  --color-bg: #111E30;
+  --color-bg-secondary: #1B2D44;
+  --color-bg-tertiary: #273D57;
+  --color-sidebar: #15263D;
+  --color-card: #192B42;
+  --color-card-hover: #21364E;
+  --color-text: #E6EFFA;
+  --color-text-secondary: #B3C5DA;
+  --color-text-tertiary: #9BAFC6;
+  --color-text-placeholder: #93A9C2;
+  --color-border: #314760;
+  --color-border-light: #293E57;
+  --color-divider: #293E57;
+  --color-accent: #92C6FF;
+  --color-accent-bg: #223F61;
+  --color-action: #2B6DB3;
+  --color-action-hover: #337CC8;
   --color-shadow: rgba(0, 0, 0, 0.2);
 }
 
@@ -76,10 +82,40 @@ body {
   line-height: var(--line-height-normal);
   color: var(--color-text);
   background-color: var(--color-bg);
+  accent-color: var(--color-accent);
 }
 
 #root {
   min-height: 100vh;
+}
+
+::selection {
+  color: var(--color-text);
+  background: var(--color-accent-bg);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.app-shell {
+  background-image: radial-gradient(ellipse at top right, var(--color-accent-bg), transparent 60%);
+}
+
+.auth-shell {
+  background-color: var(--color-bg);
+  background-image:
+    radial-gradient(ellipse at 20% 15%, var(--color-accent-bg), transparent 55%),
+    radial-gradient(ellipse at 85% 85%, var(--color-bg-tertiary), transparent 50%);
+}
+
+.auth-card {
+  box-shadow: 0 20px 70px var(--color-shadow), 0 3px 14px var(--color-shadow);
+}
+
+.learning-card {
+  box-shadow: 0 3px 16px var(--color-shadow);
 }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }

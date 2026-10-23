@@ -1,16 +1,19 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Send, Sparkles, Bot, User, ChevronDown, ChevronRight, Loader2, ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
+import { Send, Bot, User, ChevronDown, ChevronRight, Loader2, ChevronsDownUp, ChevronsUpDown, History, X } from 'lucide-react'
+import * as Dialog from '@radix-ui/react-dialog'
+import Sessions from './Sessions'
 import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
-import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import { useSSE } from '../hooks/useSSE'
 import { sessionsApi } from '../api/sessions'
 import { useThemeStore } from '../stores/useThemeStore'
 import { endpoints } from '../api/endpoints'
-import type { ApprovalPayload, SSEMessage } from '../types/api'
+import type { ApprovalPayload, SSEMessage, AnswerSource } from '../types/api'
+import AnswerSources from '../components/knowledge/AnswerSources'
+import BrandMark from '../components/common/BrandMark'
 import { isEvidenceEvent, isReadableRetrievalStatus, isRetrievalStage, isVisibleThinkingStage, mergeThinkingStep, previewEvidence, retrievalStatusLabel, toEvidence } from '../utils/thinkingTrace'
 import type { ThinkingStep } from '../utils/thinkingTrace'
 
@@ -19,12 +22,13 @@ interface Message {
   content: string
   thinking?: string
   steps?: string[]
+  sources?: AnswerSource[]
 }
 
 const quickQuestions = [
-  '帮我解释一下量子计算',
-  '写一首关于春天的诗',
-  '推荐几本提升思维的书',
+  '根据我的笔记和文档，总结我最近学习的主题并注明来源',
+  '检索我的知识库，解释混合检索和向量检索的区别',
+  '将我已有资料中关于 RAG 评估的要点整理成一份学习提纲',
 ]
 
 const evidenceSourceLabels: Record<string, string> = {
@@ -70,6 +74,7 @@ function stripMarkdown(text: string): string {
 }
 
 export default function AIChat() {
+  const [historyOpen, setHistoryOpen] = useState(false)
   const { sessionId } = useParams()
   const navigate = useNavigate()
   const { t } = useTranslation()
@@ -102,6 +107,7 @@ export default function AIChat() {
   }
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef('')
+  const sourcesRef = useRef<AnswerSource[]>([])
   const rafRef = useRef<number | null>(null)
   const pendingThinkingRef = useRef<ThinkingStep[]>([])
   const thinkingTimerRef = useRef<number | null>(null)
@@ -143,9 +149,9 @@ export default function AIChat() {
       const newMsgs = [...prev]
       const last = newMsgs[newMsgs.length - 1]
       if (last?.role === 'assistant') {
-        newMsgs[newMsgs.length - 1] = { ...last, content: contentRef.current }
+        newMsgs[newMsgs.length - 1] = { ...last, content: contentRef.current, sources: sourcesRef.current }
       } else {
-        newMsgs.push({ role: 'assistant', content: contentRef.current })
+        newMsgs.push({ role: 'assistant', content: contentRef.current, sources: sourcesRef.current })
       }
       return newMsgs
     })
@@ -197,11 +203,11 @@ export default function AIChat() {
   useEffect(() => {
     if (sessionId) {
       sessionsApi.get(sessionId).then((res) => {
-        const data = res.data as { history?: [string, string][]; pending_run_id?: string | null } | undefined
+        const data = res.data
         if (data?.history) {
-          setMessages(data.history.flatMap(([query, response]) => [
+          setMessages(data.history.flatMap(([query, response], index) => [
             { role: 'user', content: query },
-            { role: 'assistant', content: response },
+            { role: 'assistant', content: response, sources: data.sources?.[index] || [] },
           ]))
         }
         if (data?.pending_run_id) {
@@ -239,6 +245,7 @@ export default function AIChat() {
     setShowThinking(true)
 
     contentRef.current = ''
+    sourcesRef.current = []
     let hasResponseStarted = false
 
     await start(
@@ -297,6 +304,9 @@ export default function AIChat() {
             thinkingTimerRef.current = window.setTimeout(flushOne, 150)
           }
           thinkingTimerRef.current = window.setTimeout(flushOne, 150)
+        },
+        onSources: (sources) => {
+          if (thinkingGenerationRef.current === requestGeneration) sourcesRef.current = sources
         },
         onResponse: (content, sessionId) => {
           if (thinkingGenerationRef.current !== requestGeneration || thinkingTerminalGenerationRef.current === requestGeneration) return
@@ -486,7 +496,7 @@ export default function AIChat() {
           {thinkingSteps.map((step, index) => (
             <details key={`${step.stage}-${index}`} open={index === thinkingSteps.length - 1} className="rounded-md bg-[var(--color-bg-secondary)] border border-[var(--color-border)]">
               <summary className="cursor-pointer list-none px-3 py-2 text-xs text-[var(--color-text)] flex items-center justify-between gap-3">
-                <span className="font-medium">{index + 1}. {step.stage}</span>
+                <span className="font-medium">{index + 1}. {step.stage === 'query_rewrite' ? '理解追问' : step.stage === 'reorder' ? t('chat.reorder') : step.stage}</span>
                 <span className="text-[var(--color-text-tertiary)]">
                   {isReadableRetrievalStatus(step.stage, step.details) ? retrievalStatusLabel(step.details?.status, step.stage) : ''}
                 </span>
@@ -495,8 +505,11 @@ export default function AIChat() {
                 {isReadableRetrievalStatus(step.stage, step.details) && (
                   <p className="leading-relaxed whitespace-pre-wrap">{retrievalStatusLabel(step.details?.status, step.stage)}</p>
                 )}
-                {step.stage === 'agentic_plan' && (
+                {['query_rewrite', 'agentic_plan', 'reorder'].includes(step.stage) && (
                   <p className="leading-relaxed whitespace-pre-wrap">{step.content}</p>
+                )}
+                {step.stage === 'query_rewrite' && step.details?.status === 'resolved' && typeof step.details.retrieval_query === 'string' && (
+                  <p className="leading-relaxed whitespace-pre-wrap">本轮检索问题：{step.details.retrieval_query}</p>
                 )}
                 {step.stage === 'agentic_plan' && step.details && (
                   <div className="space-y-1 text-[var(--color-text-tertiary)]">
@@ -565,38 +578,54 @@ export default function AIChat() {
 
   return (
     <div className="h-full flex flex-col">
-      {messages.length > 0 && (
-        <div className="shrink-0 px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-          <div className="max-w-3xl mx-auto flex justify-end">
+        <div className="shrink-0 px-4 sm:px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+          <div className="max-w-3xl mx-auto flex justify-between gap-2">
+            <button onClick={() => setHistoryOpen(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]">
+              <History size={15} />{t('nav.sessions')}
+            </button>
             <button
+              disabled={isLoading}
               onClick={() => {
                 sessionStorage.removeItem('lastSessionId')
                 setMessages([])
                 navigate('/chat')
               }}
-              className="px-3 py-1.5 text-xs rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors"
+              className="px-3 py-1.5 text-xs rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-50"
             >
               {t('chat.newSession')}
             </button>
           </div>
         </div>
-      )}
+      <Dialog.Root open={historyOpen} onOpenChange={setHistoryOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/30 z-40" />
+          <Dialog.Content className="fixed inset-y-0 right-0 w-[min(440px,100vw)] bg-[var(--color-card)] border-l border-[var(--color-border)] shadow-xl z-50 overflow-y-auto" aria-describedby={undefined}>
+            <div className="flex items-center justify-between px-6 pt-6 pb-2">
+              <Dialog.Title className="font-heading text-lg font-semibold">{t('nav.sessions')}</Dialog.Title>
+              <Dialog.Close aria-label={t('common.close')} className="p-2 rounded-md hover:bg-[var(--color-bg-secondary)]"><X size={18} /></Dialog.Close>
+            </div>
+            <Sessions embedded onSelect={() => setHistoryOpen(false)} />
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-3xl mx-auto space-y-6">
           {messages.length === 0 && !isLoading && (
             <div className="py-16 text-center space-y-6">
               <div className="flex justify-center">
-                <div className="w-16 h-16 rounded-2xl bg-[var(--color-accent-bg)] flex items-center justify-center">
-                  <Sparkles size={28} className="text-[var(--color-accent)]" />
-                </div>
+                <BrandMark className="w-20 h-20" />
               </div>
-              <h2 className="font-heading text-xl text-[var(--color-text)]">{t('chat.welcome')}</h2>
+              <p className="text-xs font-medium tracking-wider text-[var(--color-accent)]">{t('app.name')} · {t('app.subtitle')}</p>
+              <div className="space-y-3">
+                <h2 className="font-heading text-2xl font-semibold text-[var(--color-text)]">{t('chat.welcome')}</h2>
+                <p className="text-sm text-[var(--color-text-secondary)]">{t('chat.welcomeDescription')}</p>
+              </div>
               <div className="flex flex-wrap justify-center gap-2 max-w-md mx-auto">
                 {quickQuestions.map((q) => (
                   <button
                     key={q}
                     onClick={() => handleSend(q)}
-                    className="px-4 py-2 text-xs rounded-full border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors"
+                    className="px-4 py-3 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] hover:bg-[var(--color-card-hover)] transition-colors"
                   >
                     {q}
                   </button>
@@ -620,7 +649,7 @@ export default function AIChat() {
               )}
               <div className={`max-w-[75%] ${msg.role === 'user' ? 'order-first' : ''}`}>
                 {msg.role === 'user' ? (
-                  <div className="px-4 py-2.5 rounded-2xl bg-[var(--color-accent)] text-white text-sm">
+                  <div className="px-4 py-2.5 rounded-2xl bg-[var(--color-action)] text-white text-sm">
                     {msg.content}
                   </div>
                 ) : (
@@ -631,15 +660,16 @@ export default function AIChat() {
                       </div>
                     )}
                     <div className={`prose prose-sm max-w-none markdown-body${theme === 'dark' ? ' prose-invert' : ''}`}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight, rehypeRaw]}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
                         {msg.content}
                       </ReactMarkdown>
                     </div>
+                    {msg.sources && <AnswerSources sources={msg.sources} />}
                     {hasStreamingAssistant && i === messages.length - 1 && (
                       <div className="flex gap-1 mt-3">
-                        <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-bounce" style={{ animationDelay: '300ms' }} />
+                        <span className="w-2 h-2 rounded-full bg-[var(--color-action)] animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-2 h-2 rounded-full bg-[var(--color-action)] animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-2 h-2 rounded-full bg-[var(--color-action)] animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
                     )}
                   </>
@@ -661,9 +691,9 @@ export default function AIChat() {
               <div className="space-y-2 flex-1">
                 {thinkingPanel}
                 <div className="flex gap-1">
-                  <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <span className="w-2 h-2 rounded-full bg-[var(--color-action)] animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 rounded-full bg-[var(--color-action)] animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 rounded-full bg-[var(--color-action)] animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
               </div>
             </div>
@@ -731,7 +761,7 @@ export default function AIChat() {
                           <div className="text-[var(--color-text-tertiary)]">正文预览：</div>
                           {expanded ? (
                             <div className={`prose prose-sm max-w-none markdown-body${theme === 'dark' ? ' prose-invert' : ''} max-h-96 overflow-y-auto pr-2`}>
-                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight, rehypeRaw]}>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
                                 {content}
                               </ReactMarkdown>
                             </div>
@@ -771,7 +801,7 @@ export default function AIChat() {
               <button
                 onClick={handleApprove}
                 disabled={approveSubmitting}
-                className="px-4 py-1.5 rounded-md bg-[var(--color-accent)] text-white text-sm disabled:opacity-50"
+                className="px-4 py-1.5 rounded-md bg-[var(--color-action)] text-white text-sm disabled:opacity-50"
               >
                 同意
               </button>
@@ -796,6 +826,7 @@ export default function AIChat() {
       <div className="border-t border-[var(--color-border)] bg-[var(--color-card)] px-6 py-4">
         <div className="max-w-3xl mx-auto flex gap-3">
           <textarea
+            aria-label={t('chat.input')}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -804,9 +835,10 @@ export default function AIChat() {
             className="flex-1 px-4 py-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-placeholder)] resize-none focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
           />
           <button
+            aria-label={t('chat.send')}
             onClick={() => handleSend(input)}
             disabled={!input.trim() || loading || approveSubmitting}
-            className="flex items-center justify-center w-10 h-10 rounded-lg bg-[var(--color-accent)] text-white hover:bg-blue-700 disabled:opacity-40 transition-colors shrink-0"
+            className="flex items-center justify-center w-10 h-10 rounded-lg bg-[var(--color-action)] text-white hover:bg-[var(--color-action-hover)] disabled:opacity-40 transition-colors shrink-0"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           </button>

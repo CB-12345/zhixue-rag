@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import type { RouteObject } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import AuthLayout from '../layouts/AuthLayout'
 import LoadingSkeleton from '../components/common/LoadingSkeleton'
@@ -36,7 +37,7 @@ const routes: RouteObject[] = [
     path: '/',
     element: <MainLayout />,
     children: [
-      { index: true, element: <LazyLoad><NoteList /></LazyLoad> },
+      { index: true, element: <Navigate to="/knowledge" replace /> },
       { path: 'notes', element: <LazyLoad><NoteList /></LazyLoad> },
       { path: 'notes/:id', element: <LazyLoad><NoteEditor /></LazyLoad> },
       { path: 'notes/new', element: <LazyLoad><NoteEditor /></LazyLoad> },

@@ -121,7 +121,7 @@ export default function DailyReview() {
               </p>
               <button
                 onClick={() => handleStartQuiz(current.note_id)}
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--color-accent)] text-white hover:bg-blue-700 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--color-action)] text-white hover:bg-[var(--color-action-hover)] transition-colors"
               >
                 {t('review.question')}
                 <ChevronRight size={14} />
@@ -189,7 +189,7 @@ export default function DailyReview() {
                   >
                     {t('review.done')}
                   </button>
-                  <button onClick={handleConfirm} className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--color-accent)] text-white hover:bg-blue-700 transition-colors">
+                  <button onClick={handleConfirm} className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--color-action)] text-white hover:bg-[var(--color-action-hover)] transition-colors">
                     {t('common.confirm')}
                     <ChevronRight size={14} />
                   </button>
@@ -199,7 +199,7 @@ export default function DailyReview() {
               {showResult && currentIndex >= items.length - 1 && (
                 <button
                   onClick={handleDoneThenNext}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm rounded-md bg-[var(--color-accent)] text-white hover:bg-blue-700 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm rounded-md bg-[var(--color-action)] text-white hover:bg-[var(--color-action-hover)] transition-colors"
                 >
                   <GraduationCap size={16} />
                   {t('review.done')}

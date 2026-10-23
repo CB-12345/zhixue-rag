@@ -85,9 +85,12 @@ class _BackgroundInitManager:
         )
 
         if resolve_chat_config()["api_key"]:
-            self.chat_model = await asyncio.to_thread(
-                lambda: ChatModelFactory().generator()
-            )
+            try:
+                self.chat_model = await asyncio.to_thread(
+                    lambda: ChatModelFactory().generator()
+                )
+            except Exception as e:
+                logger.warning(f"对话模型初始化失败，基础索引仍可启动: {e}")
         else:
             logger.warning("对话配置不完整，chat_model 预热已跳过")
         logger.info("✅ chat_model 初始化完成")
@@ -110,9 +113,12 @@ class _BackgroundInitManager:
         )
         logger.info("✅ embed_model 初始化完成")
 
-        self.vision_model = await asyncio.to_thread(
-            lambda: VisionModelFactory().generator()
-        )
+        try:
+            self.vision_model = await asyncio.to_thread(
+                lambda: VisionModelFactory().generator()
+            )
+        except Exception as e:
+            logger.warning(f"视觉模型初始化失败，文本索引仍可启动: {e}")
         logger.info("✅ vision_model 初始化完成")
 
         self.models_ready.set()

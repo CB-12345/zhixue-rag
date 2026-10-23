@@ -1,4 +1,5 @@
 """reorder_service.py — ReorderService 云端 rerank 逻辑测试（不发真实网络请求）。"""
+import pytest
 
 from app.rag.reorder_service import ReorderService
 
@@ -35,10 +36,12 @@ class FakeAsyncClient:
         return _Resp(self.payload)
 
 
-def _make_service(payload=None, exc: Exception | None = None) -> tuple[ReorderService, FakeAsyncClient]:
+def _make_service(payload=None, exc: Exception | None = None, provider="compatible") -> tuple[ReorderService, FakeAsyncClient]:
     """构造走假 HTTP 客户端的服务实例，返回 (service, client)。"""
     client = FakeAsyncClient(payload=payload, exc=exc)
     service = ReorderService(http_client_factory=lambda **kw: client)
+    service.provider, service.enabled = provider, True
+    service.api_base_url, service.api_key, service.model = "https://rerank.test/v1", "test", "test-model"
     return service, client
 
 
@@ -57,7 +60,8 @@ class TestReorderDocuments:
         assert [d["document"] for d in docs] == ["docB", "docC", "docA"]
         assert [d["similarity"] for d in docs] == [0.9, 0.5, 0.3]
         for d in docs:
-            assert set(d.keys()) == {"document", "similarity"}
+            assert set(d.keys()) == {"index", "document", "similarity"}
+        assert [d["index"] for d in docs] == [1, 2, 0]
 
     async def test_request_carries_model_query_documents(self):
         service, client = _make_service(payload=_rerank_payload([0.5]))
@@ -96,12 +100,80 @@ class TestReorderDocuments:
         result = await service.reorder_documents("q", ["a", "b"])
         assert result["success"] is False
         assert result["documents"] == []
-        assert result["error"] == "rerank 服务不可用"
+        assert result["status"] == "error"
+        assert "保留原排序" in result["error"]
 
     async def test_no_callback_when_none(self):
         service, _ = _make_service(payload=_rerank_payload([1.0]))
         result = await service.reorder_documents("q", ["a"])
         assert result["success"] is True
+
+    @pytest.mark.parametrize("provider", ["compatible", "dashscope"])
+    @pytest.mark.parametrize("payload", [
+        {"results": [{"index": 0, "relevance_score": 0.1}]},
+        {"results": [{"index": 0, "relevance_score": 0.1}, {"index": 0, "relevance_score": 0.9}]},
+        {"results": [{"index": -1, "relevance_score": 0.1}, {"index": 1, "relevance_score": 0.9}]},
+        {"results": [{"index": True, "relevance_score": 0.1}, {"index": 0, "relevance_score": 0.9}]},
+        {"results": [{"index": 0, "relevance_score": float("nan")}, {"index": 1, "relevance_score": 0.9}]},
+        {"results": [{"index": 0, "relevance_score": None}, {"index": 1, "relevance_score": 0.9}]},
+        {"results": [{"index": 0, "relevance_score": 0.1}, {"index": 2, "relevance_score": 0.9}]},
+        {"results": "invalid"}, [],
+    ])
+    async def test_invalid_responses_never_return_partial_documents(self, payload, provider):
+        service, _ = _make_service(payload={"output": payload} if provider == "dashscope" else payload, provider=provider)
+        result = await service.reorder_documents("q", ["a", "b"])
+        assert result["success"] is False and result["documents"] == []
+        assert result["status"] == "invalid_response"
+
+    async def test_out_of_order_provider_rows_map_to_original_document_indexes(self):
+        service, _ = _make_service(payload={"results": [
+            {"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.2}]})
+        result = await service.reorder_documents("q", ["a", "b"])
+        assert [row["index"] for row in result["documents"]] == [1, 0]
+
+    async def test_missing_config_and_disabled_never_call_network(self):
+        service, client = _make_service()
+        service.api_key = ""
+        assert (await service.reorder_documents("q", ["a"]))["status"] == "not_configured"
+        service.enabled = False
+        assert (await service.reorder_documents("q", ["a"]))["status"] == "disabled"
+        assert client.requests == []
+
+
+class TestDashScopeRerank:
+    @pytest.mark.parametrize("base_url", ["https://llm-test.cn-beijing.maas.aliyuncs.com/api/v1/", "https://dashscope.aliyuncs.com/api/v1"])
+    async def test_native_request_and_out_of_order_response(self, base_url):
+        service, client = _make_service(provider="dashscope", payload={"output": {"results": [
+            {"index": 1, "relevance_score": .9}, {"index": 0, "relevance_score": .2}]},
+            "usage": {"total_tokens": 20}, "request_id": "test-request"})
+        service.api_base_url, service.model = base_url.rstrip("/"), "qwen3-rerank"
+        result = await service.reorder_documents("问题", ["资料甲", "资料乙"])
+        request = client.requests[0]
+        assert request["url"] == base_url.rstrip("/") + "/services/rerank/text-rerank/text-rerank"
+        assert request["headers"] == {"Authorization": "Bearer test"}
+        assert request["json"] == {"model": "qwen3-rerank", "input": {"query": "问题", "documents": ["资料甲", "资料乙"]},
+                                   "parameters": {"top_n": 2}}
+        assert result["status"] == "applied"
+        assert [row["index"] for row in result["documents"]] == [1, 0]
+        assert [row["document"] for row in result["documents"]] == ["资料乙", "资料甲"]
+
+    @pytest.mark.parametrize("payload", [{"code": "InvalidApiKey", "message": "test"},
+                                         {"results": [{"index": 0, "relevance_score": .9}]},
+                                         {"output": None}, {"output": []}, []])
+    async def test_native_error_or_missing_output_never_counts_as_success(self, payload):
+        service, _ = _make_service(provider="dashscope", payload=payload)
+        result = await service.reorder_documents("问题", ["资料甲"])
+        assert result["status"] == "invalid_response" and result["documents"] == []
+
+    def test_provider_is_explicit_and_validated(self):
+        from pydantic import ValidationError
+
+        from app.core.settings import Settings
+
+        assert Settings(_env_file=None).RERANKER_PROVIDER == "compatible"
+        assert Settings(_env_file=None, RERANKER_PROVIDER="dashscope").RERANKER_PROVIDER == "dashscope"
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, RERANKER_PROVIDER="unknown")
 
 
 class TestFormatReorderResult:

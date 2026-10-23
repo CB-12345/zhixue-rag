@@ -1,19 +1,15 @@
 """文档处理器：多格式加载 + 切片（多模态 PDF 保留页码/图片元数据）。
 
-上传管线入口 get_document：加载 → 切片 → 记录 md5（去重）→ 携带预切切片入队图谱构建
-任务（chunk/向量由 worker 落 Neo4j，本模块不再直连向量库）。
+上传管线入口 get_document 复用 KnowledgeService：加载 → 切片 → 原子登记文档与任务。
+基础索引 worker 独立写入 chunk/向量；MD5 文件仅为兼容记录。
 """
-import asyncio
 import os
-import tempfile
 
 from langchain_core.documents import Document
 
-from app.core.logger_handler import logger
 from app.rag.text_spliter import AsyncTextSplitter
 from app.utils.config import document_config
 from app.utils.file_handler import (
-    get_file_md5_hex,
     listdir_allowed_type,
     markdown_loader,
     markdown_loader_sync,
@@ -83,167 +79,17 @@ class DocumentProcessor:
         return self.spliter.split_documents_sync(documents)
 
     async def get_document(self, files: list = None, user_id: str = None, progress_callback=None):
-        """
-        处理文档并将其转为向量存入向量数据库
-        :param files: 上传的文件列表，如果为None则从数据文件夹读取
-        :param user_id: 用户ID，用于标记文档的所有者
-        :param progress_callback: 进度回调函数，用于实时返回处理进度
-        """
-        file_paths = []
-        file_names = {}
+        """复用上传登记管线，避免普通上传漏记任务或依赖过时的 MD5 标记。"""
+        from contextlib import ExitStack
 
-        if files:
-            for file in files:
-                temp_file_path = await asyncio.to_thread(
-                    tempfile.NamedTemporaryFile,
-                    delete=False,
-                    suffix=os.path.splitext(file.filename)[1]
-                )
-                content = await file.read()
-                await asyncio.to_thread(temp_file_path.write, content)
-                file_paths.append(temp_file_path.name)
-                file_names[temp_file_path.name] = file.filename
-        else:
-            allowed_file_path: tuple[str] = await listdir_allowed_type(
-                document_config['data_path'],
-                tuple(document_config['allow_knowledge_file_types'])
-            )
-            file_paths = list(allowed_file_path)
+        from fastapi import UploadFile
 
-        for idx, file_path in enumerate(file_paths):
-            filename = file_names.get(file_path, os.path.basename(file_path))
+        from app.router.knowledge_service import KnowledgeService
 
-            md5_hex = await get_file_md5_hex(file_path)
-            if await self.md5_store.check_md5_hex(md5_hex, user_id):
-                if progress_callback:
-                    await progress_callback({
-                        'step': 'skipping',
-                        'filename': filename,
-                        'message': f'文件 {filename} 已存在，跳过'
-                    })
-                logger.info(f"【向量数据库】文件 {file_path} 的md5值 {md5_hex} 已存在，跳过")
-                if files:
-                    try:
-                        os.unlink(file_path)
-                    except OSError:
-                        pass
-                continue
-
-            try:
-                if progress_callback:
-                    await progress_callback({
-                        'step': 'loading',
-                        'filename': filename,
-                        'message': f'正在加载文档 {filename}...'
-                    })
-                logger.info(f"【向量数据库】开始加载文档: {filename}")
-
-                # 传入 md5_hex 和 user_id 以支持多模态PDF加载（图片提取和存储路径定位）
-                document: list[Document] = await self.get_file_document(file_path, md5_hex, user_id)
-                if not document:
-                    if progress_callback:
-                        await progress_callback({
-                            'step': 'error',
-                            'filename': filename,
-                            'message': f'文件 {filename} 加载内容为空，跳过',
-                            'error_message': '文件内容为空'
-                        })
-                    logger.error(f"【向量数据库】文件 {file_path} 加载内容为空，跳过")
-                    if files:
-                        try:
-                            os.unlink(file_path)
-                        except Exception:
-                            pass
-                    continue
-
-                if progress_callback:
-                    await progress_callback({
-                        'step': 'splitting',
-                        'filename': filename,
-                        'message': f'正在切分文档 {filename}...'
-                    })
-                logger.info(f"【向量数据库】开始切分文档: {filename}")
-
-                # 记录切分前的全文，供知识库文档入图谱抽取使用
-                full_text = "\n".join(d.page_content for d in document)
-
-                document: list[Document] = await self.spliter.split_documents(document)
-                if not document:
-                    if progress_callback:
-                        await progress_callback({
-                            'step': 'error',
-                            'filename': filename,
-                            'message': f'文件 {filename} 切分内容为空，跳过',
-                            'error_message': '文档切分后为空'
-                        })
-                    logger.error(f"【向量数据库】文件 {file_path} 切分内容为空，跳过")
-                    if files:
-                        try:
-                            os.unlink(file_path)
-                        except OSError:
-                            pass
-                    continue
-
-                if progress_callback:
-                    await progress_callback({
-                        'step': 'storing',
-                        'filename': filename,
-                        'message': f'正在存储向量 {filename}...'
-                    })
-                logger.info(f"【向量数据库】开始存储向量: {filename}，文档数量: {len(document)}")
-
-                if user_id:
-                    for doc in document:
-                        doc.metadata['user_id'] = user_id
-
-                for doc in document:
-                    doc.metadata['original_filename'] = filename
-                    doc.metadata['md5'] = md5_hex
-
-                original_filename = file_names.get(file_path, filename) if files else filename
-                await self.md5_store.save_md5_hex(md5_hex, filename, original_filename, user_id)
-
-                # 知识库文档入图谱：入库成功后入队构建任务（携带预切切片，保留页码/图片元数据；
-                # 懒加载避免循环依赖；失败不影响上传主流程）
-                try:
-                    from app.graph.services.graph_service import maybe_schedule_doc_extraction
-                    graph_chunks = [
-                        {"chunk_index": i, "text": doc.page_content,
-                         "page": doc.metadata.get("page"),
-                         "image_paths": doc.metadata.get("image_paths") or []}
-                        for i, doc in enumerate(document)]
-                    asyncio.create_task(
-                        maybe_schedule_doc_extraction(user_id, md5_hex, filename, full_text,
-                                                      chunks=graph_chunks))
-                except Exception as e:
-                    logger.error(f"触发文档图谱抽取失败 filename={filename}: {e}")
-
-                if progress_callback:
-                    await progress_callback({
-                        'step': 'completed',
-                        'filename': filename,
-                        'message': f'文件 {filename} 处理完成'
-                    })
-                logger.info(f"【向量数据库】文件 {file_path} 的md5值 {md5_hex} 已保存")
-
-                if files:
-                    try:
-                        os.unlink(file_path)
-                    except OSError:
-                        pass
-
-            except Exception as e:
-                if progress_callback:
-                    await progress_callback({
-                        'step': 'error',
-                        'filename': filename,
-                        'message': f'文件 {filename} 处理失败',
-                        'error_message': str(e)
-                    })
-                logger.error(f"【向量数据库】文件 {file_path} 处理时出错: {e}")
-                if files:
-                    try:
-                        os.unlink(file_path)
-                    except OSError:
-                        pass
-                continue
+        with ExitStack() as stack:
+            if not files:
+                paths = await listdir_allowed_type(
+                    document_config['data_path'], tuple(document_config['allow_knowledge_file_types']))
+                files = [UploadFile(filename=os.path.basename(path),
+                                    file=stack.enter_context(open(path, "rb"))) for path in paths]
+            await KnowledgeService().consume_upload(files, user_id, progress_callback)

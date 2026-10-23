@@ -1,6 +1,6 @@
 import client from './client'
 import { endpoints } from './endpoints'
-import type { ApiResponse, ApprovalPayload, ChatSession } from '../types/api'
+import type { ApiResponse, ApprovalPayload, ChatSession, AnswerSource } from '../types/api'
 
 interface SessionsData {
   sessions: ChatSession[]
@@ -9,6 +9,7 @@ interface SessionsData {
 interface SessionDetailData {
   session_id: string
   history: [string, string][]
+  sources?: AnswerSource[][]
   pending_run_id?: string | null
 }
 

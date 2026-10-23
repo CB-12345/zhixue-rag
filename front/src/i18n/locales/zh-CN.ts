@@ -1,9 +1,15 @@
 const zhCN = {
-  app: { name: '云笺集' },
+  app: {
+    name: '智学',
+    subtitle: 'AI 学习助手',
+    tagline: '让每次学习，都有所积累',
+    workspace: '学习空间',
+  },
   nav: {
-    notes: '笔记',
-    chat: 'AI 对话',
-    sessions: '会话管理',
+    notes: '学习笔记',
+    chat: 'AI 问答',
+    sessions: '历史对话',
+    more: '更多功能',
     review: '每日回顾',
     knowledge: '知识库',
     graph: '知识图谱',
@@ -28,6 +34,10 @@ const zhCN = {
     hasAccount: '已有账号？',
     testAccount: '使用测试账号',
     passwordLength: '密码长度至少6位',
+    loginHint: '登录，继续你的学习',
+    registerHint: '开启你的学习空间',
+    showPassword: '显示密码',
+    hidePassword: '隐藏密码',
   },
   note: {
     title: '笔记',
@@ -57,7 +67,7 @@ const zhCN = {
     },
   },
   chat: {
-    title: 'AI 助手',
+    title: '智学助手',
     input: '输入你的问题...',
     send: '发送',
     newSession: '新建对话',
@@ -67,7 +77,8 @@ const zhCN = {
     hyde: '假设文档嵌入',
     reorder: '重排序文档',
     summarize: '生成回答',
-    welcome: '你好！我是你的 AI 助手，有什么可以帮你的？',
+    welcome: '你好，我是智学。今天想学点什么？',
+    welcomeDescription: '从你的笔记和文档出发，一起梳理知识、寻找答案。',
     quickQuestions: '快速提问',
   },
   knowledge: {
@@ -76,7 +87,7 @@ const zhCN = {
     dragDrop: '拖拽文件到此处，或点击选择',
     fileTypes: '支持 PDF、TXT、Markdown、Word、PPT 格式',
     uploading: '上传中',
-    success: '上传成功',
+    success: '上传成功，后台正在构建检索索引',
     fail: '上传失败',
     deleteConfirm: '确定要删除该文档吗？',
     cleanAll: '清空所有',
@@ -103,7 +114,7 @@ const zhCN = {
   settings: {
     title: '设置',
     theme: '主题',
-    light: '浅色模式',
+    light: '浅蓝色模式',
     dark: '深色模式',
     language: '语言',
   },
@@ -132,7 +143,7 @@ const zhCN = {
   },
   about: {
     title: '关于我们',
-    description: '云笺集是一个智能笔记与知识管理平台，结合 AI 大模型与知识图谱能力，帮助你更好地记录、整理和回顾知识。',
+    description: '智学是你的 AI 学习助手。把文档与笔记整理成自己的知识库，通过问答、来源查看和知识关联，让每次学习都有所积累。',
     techStack: '技术栈',
     features: '功能特性',
     featureList: {
@@ -145,6 +156,7 @@ const zhCN = {
     github: 'GitHub 仓库',
   },
   common: {
+    close: '关闭',
     loading: '加载中...',
     error: '出错了',
     retry: '重试',

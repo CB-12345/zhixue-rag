@@ -3,6 +3,7 @@
 - .env 无全局 key 是合法状态（key 按用户存 DB），启动预热缺 key 时只告警、
   各模型实例置 None，且 models_ready 必须置位（否则 _init_note_service 永久挂起）。
 """
+import pytest
 
 
 async def _clear_all_model_env(monkeypatch):
@@ -48,3 +49,33 @@ async def test_init_models_sets_ready_even_when_embed_missing(monkeypatch):
     assert mgr.chat_model is not None
     assert mgr.embed_model is None
     assert mgr.models_ready.is_set()
+
+
+@pytest.mark.parametrize("failing_model", ["chat", "vision"])
+async def test_optional_model_init_failure_does_not_prevent_index_worker(monkeypatch, failing_model):
+    from app.core.background_init import _BackgroundInitManager
+    from app.utils import factory
+
+    embed = object()
+
+    def fail(self):
+        raise RuntimeError("optional model unavailable")
+
+    monkeypatch.setattr(factory, "resolve_chat_config", lambda: {"api_key": "test"})
+    monkeypatch.setattr(factory, "create_planner_chat_openai", lambda: None)
+    monkeypatch.setattr(factory.ChatModelFactory, "generator", fail if failing_model == "chat" else lambda self: object())
+    monkeypatch.setattr(factory.VisionModelFactory, "generator", fail if failing_model == "vision" else lambda self: object())
+    monkeypatch.setattr(factory.EmbedModelFactory, "generator", lambda self: embed)
+    manager = _BackgroundInitManager()
+    steps = []
+
+    async def skip_external_init():
+        pass
+
+    for method in ("_init_graph", "_init_note_service", "_init_vector_store", "_init_reranker"):
+        monkeypatch.setattr(manager, method, skip_external_init)
+    monkeypatch.setattr(manager, "_start_graph_worker", lambda: steps.append("workers_started"))
+    await manager._initialize_all()
+    assert steps == ["workers_started"]
+    assert manager.embed_model is embed and manager.models_ready.is_set()
+    assert getattr(manager, failing_model + "_model") is None

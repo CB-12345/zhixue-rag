@@ -110,6 +110,14 @@ class GraphStore(ABC):
         """删除某来源的全部 Chunk 节点（连带 Chunk 级 MENTIONS 边）。"""
 
     @abstractmethod
+    async def replace_chunks(self, user_id: str, source_type: str, source_id: str, source_name: str,
+                             chunks: list[dict]) -> None:
+        """原子替换该用户、来源的完整切片集合；空集合清空，多余旧片段连同关联删除。
+
+        写入失败必须保留原集合。增量写入仍使用 upsert_chunks。
+        """
+
+    @abstractmethod
     async def set_source_mentions(self, user_id: str, source_type: str, source_id: str,
                                   links: list[dict]) -> None:
         """先清后插来源级 MENTIONS 边（Note/Doc→Entity，{mention_count, context}）。"""

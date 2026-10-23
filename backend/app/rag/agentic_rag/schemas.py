@@ -36,11 +36,18 @@ class RetrievalPlan(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class EvidenceQuote(BaseModel):
+    evidence_id: str
+    quote: str
+
+
 class AnswerabilityResult(BaseModel):
     answerable: bool
     confidence: float
     reason: str
     web_queries: list[str] = Field(default_factory=list)
+    supporting_quotes: list[EvidenceQuote] = Field(default_factory=list)
+    status: Literal["evaluated", "unavailable"] = "evaluated"
 
 
 class AgenticRagResult(BaseModel):
@@ -49,3 +56,6 @@ class AgenticRagResult(BaseModel):
     plan: RetrievalPlan
     answerability: AnswerabilityResult | None = None
     used_web: bool = False
+    rerank: dict[str, Any] = Field(default_factory=dict)
+    refusal_message: str = ""
+    query_resolution: dict[str, Any] = Field(default_factory=dict)

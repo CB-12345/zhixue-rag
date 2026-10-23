@@ -376,7 +376,7 @@ export default function NoteEditor() {
                   {!editingTemplate && !showNewTemplateForm && (
                     <button
                       onClick={() => { setShowNewTemplateForm(true); setEditingTemplate(null) }}
-                      className="px-3 py-1 text-xs rounded-md bg-[var(--color-accent)] text-white hover:opacity-90"
+                      className="px-3 py-1 text-xs rounded-md bg-[var(--color-action)] text-white hover:opacity-90"
                     >
                       + 新建模板
                     </button>
@@ -422,7 +422,7 @@ export default function NoteEditor() {
                     </div>
                     <div className="flex justify-end gap-2 pt-2">
                       <button onClick={() => setShowNewTemplateForm(false)} className="px-4 py-1.5 text-sm rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]">返回</button>
-                      <button onClick={handleCreateTemplate} disabled={!newTemplateForm.name.trim()} className="px-4 py-1.5 text-sm rounded-md bg-[var(--color-accent)] text-white disabled:opacity-40">创建模板</button>
+                      <button onClick={handleCreateTemplate} disabled={!newTemplateForm.name.trim()} className="px-4 py-1.5 text-sm rounded-md bg-[var(--color-action)] text-white disabled:opacity-40">创建模板</button>
                     </div>
                   </div>
                 ) : editingTemplate ? (
@@ -462,7 +462,7 @@ export default function NoteEditor() {
                     </div>
                     <div className="flex justify-end gap-2 pt-2">
                       <button onClick={() => setEditingTemplate(null)} className="px-4 py-1.5 text-sm rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]">返回</button>
-                      <button onClick={handleUpdateTemplate} className="px-4 py-1.5 text-sm rounded-md bg-[var(--color-accent)] text-white">保存修改</button>
+                      <button onClick={handleUpdateTemplate} className="px-4 py-1.5 text-sm rounded-md bg-[var(--color-action)] text-white">保存修改</button>
                     </div>
                   </div>
                 ) : (
@@ -588,7 +588,7 @@ export default function NoteEditor() {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-1.5 px-4 h-8 text-sm font-medium rounded-lg bg-[var(--color-accent)] text-white hover:opacity-90 disabled:opacity-40 transition-all ml-1"
+            className="flex items-center gap-1.5 px-4 h-8 text-sm font-medium rounded-lg bg-[var(--color-action)] text-white hover:opacity-90 disabled:opacity-40 transition-all ml-1"
           >
             <Save size={15} />
             {saving ? '保存中' : t('note.save')}
@@ -625,7 +625,7 @@ export default function NoteEditor() {
                     onClick={() => setCategory(category === cat.value ? '' : cat.value)}
                     className={`px-3 py-1 text-xs rounded-full font-medium transition-all ${
                       category === cat.value
-                        ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                        ? 'bg-[var(--color-action)] text-white shadow-sm'
                         : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text)]'
                     }`}
                   >
@@ -713,7 +713,7 @@ export default function NoteEditor() {
               <button
                 onClick={handleSaveAsTemplate}
                 disabled={!templateName.trim()}
-                className="px-4 py-1.5 text-sm rounded-md bg-[var(--color-accent)] text-white disabled:opacity-40"
+                className="px-4 py-1.5 text-sm rounded-md bg-[var(--color-action)] text-white disabled:opacity-40"
               >
                 保存
               </button>

@@ -1,0 +1,7 @@
+[
+  {"id":"fact","query":"检索我的资料：学习记录 HYB-2048 的实验负责人是谁？","keywords":["周予安"],"requires_sources":true},
+  {"id":"retrieval","query":"根据混合检索学习卡，为什么要组合向量检索与关键词检索，用什么方式融合？","keywords":["语义","精确","RRF"],"requires_sources":true},
+  {"id":"evaluation","query":"根据 RAG 评估备忘录，演示验收日期和来源核对人分别是什么？","keywords":["2026","11","12","顾清禾"],"requires_sources":true},
+  {"id":"cross_source","query":"结合混合检索学习卡和 RAG 评估备忘录，解释 RRF 分数能否当成答案正确概率，以及应当检查哪两个评估层面。","keywords":["检索","回答"],"requires_sources":true},
+  {"id":"unknown","query":"RAG 评估备忘录记录的线上用户量具体是多少？只依据资料回答。","keywords":["没有"],"requires_sources":true}
+]

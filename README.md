@@ -1,383 +1,153 @@
-# RAG NoteBook— 智能笔记助手
+# 智学 · AI 学习助手
 
-<div align="center">
-<a href="https://github.com/RMA-MUN/RAGNotebook/stargazers">
-  <img src="https://img.shields.io/github/stars/RMA-MUN/RAGNotebook?style=flat-square&label=Stars&color=orange" alt="Stars">
-</a>
-<a href="https://github.com/RMA-MUN/RAGNotebook/network/members">
-  <img src="https://img.shields.io/github/forks/RMA-MUN/RAGNotebook?style=flat-square&label=Forks&color=green" alt="Forks">
-</a>
-<a href="https://github.com/RMA-MUN/RAGNotebook/actions/workflows/ci.yml">
-  <img src="https://github.com/RMA-MUN/RAGNotebook/actions/workflows/ci.yml/badge.svg" alt="CI">
-</a>
-  <img src="https://img.shields.io/badge/python-v3.12.4-blue.svg" alt="Python">
-</div>
+面向课程讲义、技术文档和个人笔记的 RAG 学习助手。上传资料后，可以基于原文提问、比较知识点、查看代码示例，并回到引用的文档位置核对答案。
 
-AI 驱动的个人知识管理工具，融合 **笔记管理 + neo4j知识图谱 + GraphRAG + AI 写作辅助**，解决"笔记写了从不回看、知识散落成孤岛"的问题。
+前端采用浅蓝色界面，主流程是 **知识库 → AI 问答 → 学习笔记**。
 
----
+## 项目界面
 
-## 项目变迁
+**资料问答**：基于已上传资料回答问题，展示回答依据和检索来源，支持继续追问。
 
-本项目最初是一个**基础 RAG 对话系统**，我们做了一次重要转型，从基础的 RAG，转型为解决实际问题的 RAG NoteBook：
+![智学资料问答界面](docs/screenshots/zhixue-chat.png)
 
-| | 阶段一（base-rag 分支） | 阶段二（master 分支） |
-|--|-----------------------|:--------------------|
-| **定位** | 纯 RAG 对话服务，开箱即用 | 智能笔记助手，长期维护支持版本， Agentic RAG + KnowledgeGraph |
-| **能力** | 文档上传 → 向量检索 → AI 问答（非GraphRAG） | 笔记管理 + 知识图谱 + RAG + AI 写作 |
-| **适合谁** | 想快速集成 RAG 能力的开发者或希望学习RAG技术的个人 | 需要AI管理笔记和知识库的个人以及简历需要相关项目的求职者 |
+**知识库管理**：上传学习资料，查看索引状态和文档切片数量。
 
-**RAG 始终是整个系统的核心引擎。** 基础 RAG 代码已永久保留在 `base-rag` 分支供学习使用，如果只需要纯 RAG 服务，切换到`base-rag`即可开箱使用。
+![智学知识库管理界面](docs/screenshots/zhixue-knowledge.png)
 
-> 📄 [查看完整项目变迁 →](./docs/project_develop.md)
+**引用溯源**：展开回答引用，打开原文片段，核对页码、上下文与代码。
 
-## 📋 目录
+![智学引用溯源界面](docs/screenshots/zhixue-source.png)
 
-- [项目简介](#项目简介)
-- [项目变迁](#项目变迁)
-- [核心特性](#核心特性)
-- [项目架构](#项目架构)
-- [项目演示](#项目演示)
-- [快速开始](#快速开始)
-- [技术栈](#技术栈)
-- [项目结构](#项目结构)
-- [API 文档](#api文档)
-- [配置说明](#配置说明)
-- [部署指南](#部署指南)
-- [开发指南](#开发指南)
-- [故障排除](#故障排除)
-- [联系方式](#联系方式)
+截图来自本机实际运行的界面。示例课程资料由使用者自行导入，完整教材与个人笔记不随仓库提供。
 
-## 项目简介
+## 主要功能
 
-基于 **FastAPI + LangChain** 构建的智能笔记助手，核心能力包括：
+- **文档入库**：支持 PDF、DOCX、Markdown、TXT、PPTX；保留标题路径、表格行及 PDF 物理页码，异步构建索引。
+- **检索与重排**：Neo4j 向量与全文混合召回，可接百炼或 Cohere/Jina 兼容重排序；按用户和资料类型隔离检索。
+- **资料问答**：支持多轮指代补全；先检查证据是否足够，再生成并核对回答。每项事实标注来源，资料不足时明确说明。
+- **原文溯源**：查看引用片段、定位原文位置；回答与来源快照共同保存，刷新后可恢复历史。
+- **学习笔记**：笔记编辑、分类、标签和关联资料。图谱与每日回顾保留在“更多功能”中。
+- **评测工具**：固定题集、检索指标、回答要点、拒答、Top-K 对比和 SSE 耗时评测。
 
-- **RAG 知识库**：多格式文档上传（txt/pdf/md/pptx/docx），自动构建知识图谱，图谱引导的混合检索问答
-- **笔记管理**：Markdown 编辑器、笔记自动写入知识图谱、智能标签（LLM 自动分类）、语义搜索、Markdown 导出
-- **间隔重复回顾**：艾宾浩斯遗忘曲线算法，对抗遗忘
-- **AI 写作辅助**：联机补全、续写/扩写/摘要、关联笔记推荐
+## 技术栈与流程
 
-系统支持会话持久化（MySQL）、向量检索（Neo4j 知识图谱）、JWT 用户隔离，前端采用React+Tailwind CSS构建现代化界面。
+| 部分 | 技术 |
+| --- | --- |
+| 前端 | React、TypeScript、Vite、Tailwind CSS |
+| 后端 | FastAPI、LangChain、LangGraph |
+| 数据 | MySQL、Redis、Neo4j |
+| 模型 | OpenAI 兼容回答/嵌入接口，可选云端重排序 |
+| 运行 | Docker Compose、Nginx、JWT 用户认证 |
 
-## 核心特性
-
-- **📝 笔记管理**：Markdown 编辑器，支持新建、编辑、删除、分类筛选、分页列表
-- **🏷️ 智能标签**：保存笔记后 LLM 异步生成标签和分类（工作/学习/生活/项目），无需手动归类
-- **🔍 语义搜索**：Neo4j 向量 + 全文混合检索（RRF 融合），笔记/知识库统一召回
-- **🕸️ 知识图谱**：LLM 抽取实体与关系存入 Neo4j，可视化画布浏览，检索时沿图扩展证据
-- **✍️ AI 联机补全**：打字停顿后模型实时补全，Tab 键快速采纳
-- **🤖 AI 写作助手**：续写、扩写、摘要生成，SSE 流式输出
-- **🔗 跨源关联推荐**：编辑笔记时，从笔记库和知识库双向检索 Top k 相关文档
-- **💬 智能问答**：图谱引导的 Agentic RAG 对话，回答附知识图谱与笔记来源引用
-- **💾 会话持久化**：MySQL 存储对话历史，随时回溯
-- **📄 文档管理**：支持 TXT / PDF / MD / PPTX / DOCX 上传，可视化切片详情
-- **🌐 多语言支持**：前端 i18n，中英文界面切换
-- **⛑️ 安全隔离**：用户级知识库隔离，RAG 检索只能访问本人数据
-
-## 项目演示
-
-| 功能模块 | 界面展示 |
-|---------|:--------|
-| 笔记编辑 | ![笔记编辑](./images/editor_note.png) |
-| 笔记列表 | ![笔记列表](./images/note.png) |
-| 知识库 | ![知识库](./images/knowledge_manager.png) |
-| 知识图谱 | ![知识图谱](./images/knowledge_graph.png) |
-| 对话检索（**图谱引导 RAG，回答附来源引用**） | ![AI 聊天](./images/aichat.png) |
-
-## 快速开始
-
-> 💡 想最快跑起来？直接用下方 **Docker 一键启动**，无需安装 Python / Node / MySQL / Redis / Neo4j。
-
-### Docker 一键启动（推荐）
-
-前置要求：已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 并启动引擎；建议内存 ≥ 4GB；首次构建约 10 分钟（后端依赖较大）。
-
-```bash
-git clone https://github.com/RMA-MUN/RAGNotebook.git
-cd RAGNotebook
+```mermaid
+flowchart LR
+    A[上传资料] --> B[解析与结构切片]
+    B --> C[异步索引]
+    Q[问题与对话上下文] --> R[向量与全文召回]
+    C --> R
+    R --> S[重排序与证据筛选]
+    S --> T[可答性核对]
+    T --> U[生成与最终原文核对]
+    U --> V[答案、引用与历史]
 ```
 
-**Windows**：直接双击（或在终端运行）根目录 `start.bat`——自动生成 `backend/.env`（如不存在）、构建并启动全部 5 个容器、等待后端就绪后打开浏览器。
+本地证据默认从 20 条候选中重排选取 3 条，融合上下文仍有字符和数量上限。这是当前题集对比后采用的配置，可以通过 `RAG_CONTEXT_K` 调整，详细条件及失败样例见 [Top-K 实验](docs/topk-20261023/README.md)。
 
-**Linux / macOS**（手动方式，`start.bat` 仅 Windows）：
+## 快速启动
+
+安装并启动 Docker Desktop，下载或克隆本仓库后，在项目根目录执行：
 
 ```bash
-# 1. 生成环境变量文件并填入模型 Key
 cp backend/.env.example backend/.env
-#    编辑 backend/.env，至少填写 OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL_NAME
-# 2. 构建并启动（可选：改库密码在根目录 .env 中覆盖 MYSQL_ROOT_PASSWORD / NEO4J_PASSWORD）
+# 编辑 backend/.env，填写模型配置和自己的 SECRET_KEY
+
 docker compose up -d --build
+docker compose ps
 ```
 
-启动完成后：
+Windows PowerShell 可以用 `Copy-Item backend/.env.example backend/.env` 复制配置，也可以直接运行 `start.bat`。
 
-| 入口 | 地址 | 说明 |
-|------|------|------|
-| 前端页面 | http://localhost:3000 | 默认账号 `admin / admin1234`（后端启动时自动创建） |
-| 后端 API 文档 | http://localhost:8000/docs | 便于调试 |
+- 页面：http://localhost:3000
+- API 文档：http://localhost:8000/docs
+- 健康检查：http://localhost:8000/health
+- 首次启动提供演示账号 `admin / admin1234`，对外使用前请修改密码。
 
-常用操作：
+至少配置回答与嵌入模型。不同供应商的接口可以组合使用，示例如下；密钥只填在本机 `.env` 中。
+
+```dotenv
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_API_KEY=your-chat-api-key
+OPENAI_MODEL_NAME=your-chat-model
+
+EMBED_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+EMBED_API_KEY=your-embedding-api-key
+EMBED_MODEL_NAME=text-embedding-v3
+
+SECRET_KEY=replace-with-your-own-random-secret
+```
+
+重排序、规划模型和其他开关见 [backend/.env.example](backend/.env.example)。百炼重排序使用独立的重排序协议，接入说明见 [重排序与评测](docs/RERANK_AND_EVALUATION.md)。首次构建包含较大的文档解析依赖，需要预留下载时间和磁盘空间。
+
+修改环境变量后重新创建后端，并刷新 Nginx 到后端的连接：
 
 ```bash
-docker compose up -d          # 启动（重启电脑后恢复用）
-docker compose down           # 停止（数据保留）
-docker compose logs -f backend   # 查看后端日志
-docker compose restart backend   # 修改 backend/.env 的模型 Key 后使其生效
+docker compose up -d --force-recreate backend
+docker compose restart frontend
 ```
 
-> **重要**：模型密钥通过 `backend/.env` 挂载注入（已 .gitignore，不会进入镜像），容器内 MySQL / Redis / Neo4j 的地址与密码由 `docker-compose.yml` 自动接管，无需也不应修改 `.env` 中的 localhost 配置；未配置 LLM Key 时服务可正常启动浏览，但问答等 AI 功能不可用。
->
-> 数据持久化：MySQL / Redis / Neo4j 数据在 Docker 数据卷中，上传文件/日志在 `backend/media`、`backend/logs`、`backend/data` 目录。彻底重置全部数据：`docker compose down -v`（慎用，会清空数据库）。
+停止服务使用 `docker compose down` 或 `stop.bat`。保留 Docker 数据卷即可保留数据库；原始上传资料和运行数据由 `backend/media`、`backend/data` 挂载保存。
 
-### 本地开发（非 Docker）
+## 开发与测试
 
-#### 环境要求
+后端使用 Python 3.12 和 uv：
 
-| 环境 | 版本推荐 |
-|------|----------|
-| Python | 3.12+ |
-| uv | 0.11.9 |
-| Node.js | 16+ |
-
-#### 克隆项目
-
-```bash
-git clone https://github.com/RMA-MUN/RAGNotebook.git
-cd RAGNotebook
-```
-
-#### 安装依赖
-
-##### 后端依赖
 ```bash
 cd backend
-uv sync --extra dev
+uv sync --frozen --extra dev --no-group parsers
+uv run --no-sync ruff check .
+uv run --no-sync pytest -q
 ```
 
-> 说明：文档解析依赖（`unstructured` + torch，数 GB）放在 `parsers`
-> 依赖组中，**默认随 `uv sync` 一起安装**，本地/Docker 行为不变；
-> CI 用 `uv sync --extra dev --no-group parsers` 跳过它以保持快速。
+上述安装方式用于常规测试，跳过较大的解析依赖。需要实际处理多格式文档时安装默认 `parsers` 依赖组，或使用 Docker 镜像。依赖真实 Neo4j 的集成测试需要单独测试数据库；没有配置时会跳过，不能当作通过。
 
-##### 前端依赖
+前端使用 Node.js 22：
+
 ```bash
 cd front
-npm install
+npm ci
+npm run lint
+npm run build
+npm run dev
 ```
 
-#### 环境配置
+需要后端自动重载时使用 [docker-compose.dev.yml](docker-compose.dev.yml)。持续集成检查后端 lint/测试及前端 lint/构建，支持 `main` 和 `master` 分支。
 
-##### 创建后端环境变量文件
+## 目录与演示
 
-在 `backend` 目录下创建 `.env` 文件，参考 `.env.example` 文件填写配置：
-
-```env
-# ==================== 对话模型（OpenAI 兼容协议，必填） ====================
-# 任意兼容服务：OpenAI / DeepSeek / 百炼 compatible-mode / 智谱 / Moonshot / Ollama /v1
-OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-OPENAI_API_KEY=your_api_key
-OPENAI_MODEL_NAME=qwen3-max
-
-# ==================== 嵌入模型（可选；留空回落 OPENAI_*） ====================
-# EMBED_BASE_URL=
-# EMBED_API_KEY=
-# EMBED_MODEL_NAME=text-embedding-v3
-
-# ==================== 云端重排序（可选；失败时按原顺序降级） ====================
-RERANKER_API_BASE_URL=https://api.siliconflow.cn/v1
-RERANKER_API_KEY=sk-xxx
-RERANKER_MODEL=BAAI/bge-reranker-v2-m3
-
-# ==================== 数据库配置 ====================
-MYSQL_USER=root
-MYSQL_PASSWORD=root
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_DATABASE=chat_history
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-
-# 联网搜索。因为tavily现在每个月有1000次的免费额度，所以这里默认使用的是tavily
-WEB_SEARCH_ENABLED=false
-# WEB_SEARCH_PROVIDER=tavily
-# WEB_SEARCH_API_KEY=
-
-# ==================== Neo4j 知识图谱数据库 ====================
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_password
-
-# ==================== JWT 身份验证配置 ====================
-SECRET_KEY=MY_JWT_SECRET_KEY
-ALGORITHM=HS256
+```text
+backend/app/          后端业务与 RAG 链路
+backend/tests/        自动测试
+backend/evaluation/   固定评测输入
+backend/scripts/      评测与维护工具
+front/src/            前端页面与组件
+demo/                 可公开的示例资料与演示问题
+docs/                 设计说明和实验结果
+scripts/              接口验收与性能工具
 ```
 
-> 完整配置项（视觉模型、联网搜索兜底、跨平台混搭示例等）见 [backend/.env.example](./backend/.env.example)。
+先用 [demo/ingestion](demo/ingestion/README.md) 中的自编 PDF 和 Word 示例体验导入；也可以上传自己的学习资料。完整教材、个人笔记、数据库、API 密钥和本机调试目录不随仓库上传。
 
-#### 启动服务
+- [文档与实验索引](docs/README.md)
+- [固定演示步骤](demo/README.md)
+- [架构与面试讲解](docs/SYSTEM_AND_INTERVIEW.md)
+- [简历介绍与演示讲稿](docs/INTERNSHIP_READINESS.md)
+- [最新收尾及仓库整理](docs/PUBLICATION_READINESS.md)
+- [GitHub 上传说明](docs/GITHUB_PUBLISH.md)
 
-| 服务 | 命令 | 端口 |
-|------|------|------|
-| 后端服务 | `cd backend && uvicorn main:app --reload` | 8000 |
-| 前端服务 | `cd front && npm run dev` | 3000 |
+## 评测边界
 
-| MySQL | `net start mysql` | 3306 |
-| Redis | `redis-server` 或 `net start redis` | 6379 |
-| Ollama（如果使用） | `ollama serve` | 11434 |
+实验报告分别保留首次结果、修复回归和失败案例。小样本关键词通过、接口正常结束、核心答案完整和逐句引用准确是不同指标，不将它们合并成“线上准确率”。最终原文核对仍依赖模型，可能误删正确内容或漏检引用错误，也会增加等待时间。
 
-## 技术栈
+## 来源与许可
 
-### 后端技术
-
-| 技术 | 说明 |
-|------|------|
-| FastAPI | 高性能异步 Web 框架 |
-| LangChain | 大语言模型应用开发框架（create_agent + Tools） |
-| Neo4j | 图数据库：知识图谱存储 + Chunk 向量/全文检索 |
-| SQLAlchemy | 异步 ORM，管理 MySQL |
-
-| MySQL | 关系型数据库（chat_history / notes / reviews） |
-| Redis | 缓存 |
-| OpenAI 兼容 API | LLM 服务（DashScope / DeepSeek / SiliconFlow / Ollama 任选） |
-| 云端 rerank API | 重排序服务（SiliconFlow / Jina / Cohere 兼容） |
-
-### 前端技术
-
-| 技术 | 说明 |
-|------|------|
-| React 19 | 现代化前端框架 |
-| TypeScript | 类型安全 |
-| Vite | 极速构建工具 |
-| Tailwind CSS | 原子化 CSS 框架 |
-| Radix UI | 无头 UI 组件库 |
-| Tiptap | 富文本 Markdown 编辑器 |
-| React Router DOM | 路由管理（路由守卫 + JWT 校验） |
-| Zustand | 轻量状态管理 |
-| i18next | 国际化（中/英） |
-| Axios | HTTP 客户端 |
-| react-markdown + rehype-highlight | Markdown 渲染与代码高亮 |
-| dompurify | HTML 安全过滤 |
-
-## 项目结构
-
-```
-├── backend/                     # FastAPI 后端服务
-│   ├── app/
-│   │   ├── agent/               # Agent 智能代理（create_agent + 工具定义）
-│   │   ├── cache/               # Redis 缓存装饰器
-│   │   ├── config/              # 配置文件（document.yaml 等）
-│   │   ├── core/                # 核心设施（settings 配置中心、限流、响应封装、日志、后台初始化）
-│   │   ├── db/                  # 数据库配置（MySQL + Redis）
-│   │   ├── graph/               # 知识图谱模块
-│   │   │   ├── extraction/      # LLM 实体抽取 + Chunk 规则匹配
-│   │   │   ├── routers/         # 图谱 API（总览/实体/关系/检索/SSE 事件）
-│   │   │   ├── services/        # 抽取管线 + 构建任务 worker
-│   │   │   └── storage/         # Neo4j 驱动与 GraphStore 实现
-│   │   ├── models/              # SQLAlchemy ORM 模型（笔记/回顾/对话/图谱任务等）
-│   │   ├── prompt/              # 提示词模板
-│   │   ├── rag/                 # RAG 核心功能
-│   │   │   ├── agentic_rag/     # Agentic RAG（规划/检索/证据融合/联网兜底）
-│   │   │   ├── reorder_service.py # 云端重排序服务
-│   │   │   ├── vector_store.py  # 知识库文档服务（切片/MD5/Neo4j 读取）
-│   │   │   ├── text_spliter.py  # 文档切片
-│   │   │   ├── document_handler/# 文档解析（txt/pdf/md/pptx/docx）
-│   │   │   └── md5_manager/     # 上传去重记录
-│   │   ├── router/              # API 路由（聊天/笔记/回顾/知识库/笔记模板/用户/健康）
-│   │   ├── schemas/             # Pydantic 数据模型
-│   │   ├── services/            # 业务服务层（笔记/回顾/笔记模板/会话管理）
-│   │   └── utils/               # 工具函数
-│   ├── data/                    # 数据存储目录
-│   ├── Dockerfile               # 后端容器镜像
-│   ├── .dockerignore
-│   ├── main.py                  # 应用入口
-│   └── pyproject.toml
-├── front/                       # React 前端项目
-│   ├── src/
-│   │   ├── api/                 # API 请求层（auth/chat/notes/knowledge/review/sessions/graph）
-│   │   ├── components/          # 组件
-│   │   │   ├── common/          # 通用组件（TagBadge, ConfirmDialog, EmptyState 等）
-│   │   │   ├── graph/           # 知识图谱组件（画布、实体详情面板）
-│   │   │   ├── knowledge/       # 知识库组件
-│   │   │   ├── layout/          # 布局组件（Sidebar）
-│   │   │   ├── note/            # 笔记组件（OutlinePanel, RelatedFragments）
-│   │   │   └── TiptapEditor.tsx # 富文本编辑器
-│   │   ├── hooks/               # 自定义 Hooks（useSSE, useGraphEvents）
-│   │   ├── i18n/                # 国际化（中/英）
-│   │   ├── layouts/             # 页面布局（AuthLayout, MainLayout）
-│   │   ├── pages/               # 页面
-│   │   │   ├── NoteEditor.tsx   # 笔记编辑器
-│   │   │   ├── NoteList.tsx     # 笔记列表
-│   │   │   ├── DailyReview.tsx  # 每日回顾
-│   │   │   ├── AIChat.tsx       # AI 聊天
-│   │   │   ├── GraphPage.tsx    # 知识图谱
-│   │   │   ├── Sessions.tsx     # 会话管理
-│   │   │   ├── KnowledgeBase.tsx# 知识库管理
-│   │   │   ├── Login.tsx / Register.tsx
-│   │   │   ├── Profile.tsx / Settings.tsx
-│   │   │   └── AboutUs.tsx
-│   │   ├── router/index.tsx     # 路由配置
-│   │   ├── stores/              # Zustand 状态管理
-│   │   ├── types/api.ts         # TypeScript 类型定义
-│   │   ├── App.tsx              # 应用入口组件
-│   │   └── main.tsx             # 应用入口
-│   ├── Dockerfile               # 前端多阶段构建（node 编译 → nginx 托管）
-│   ├── nginx.conf               # nginx 静态托管 + 后端 API 反向代理
-│   ├── .dockerignore
-│   └── package.json
-├── docs/                        # 项目文档
-│   ├── project_develop.md      # 项目变迁与设计思路
-│   └── troubleshooting.md      # 故障排除
-├── images/                      # 截图资源
-├── plan/                       # 开发计划归档
-├── docker-compose.yml           # Docker 一键启动编排（前端/后端/MySQL/Redis/Neo4j）
-└── start.bat                    # Windows 一键启动脚本
-```
-
-## API 文档
-
-### FastAPI 后端 API
-
-启动服务后访问交互式文档：[http://localhost:8000/docs](http://localhost:8000/docs)
-
-## 配置说明
-
-### LLM 模型切换
-
-所有模型（对话/视觉/嵌入）统一走 **OpenAI 兼容协议**，改 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL_NAME` 即可切换服务商（DeepSeek / 百炼 compatible-mode / 智谱 / Moonshot / Ollama /v1 均可）。
-
-三个能力支持跨平台混搭：`VISION_*` 与 `EMBED_*` 留空时整体回落 `OPENAI_*`，配置示例见 `.env.example`。
-
-### 重排序模型
-
-重排序已切换云端 rerank API（SiliconFlow / Jina / Cohere 兼容），配置 `RERANKER_API_BASE_URL` / `RERANKER_API_KEY` / `RERANKER_MODEL` 即可，无需下载本地模型。
-
-## 故障排除
-
-详细的故障排除指南请参考：[故障排除](./docs/troubleshooting.md)
-
-常见问题：
-
-- **API Key 错误**：检查 OPENAI_API_KEY 是否正确配置
-- **数据库连接失败**：确认 MySQL / Redis 服务已启动
-- **图谱服务异常**：检查 Neo4j 服务状态与 `NEO4J_URI` 配置
-- **重排序失败**：检查 `RERANKER_API_BASE_URL` / `RERANKER_API_KEY` 配置（失败时自动按原顺序降级）
-- **Ollama 连接失败**：确认 `ollama serve` 已运行且模型已拉取
-
-## 联系方式
-
-如有任何问题或建议，欢迎提交 GitHub Issues 或联系作者：
-
-- Email: n3032747608@163.com
-- QQ: 3032747608
-
-## Star History
-
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=rma-mun/ragnotebook&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=rma-mun/ragnotebook&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=rma-mun/ragnotebook&type=date&legend=top-left" />
- </picture>
-
-## License
-
-本项目基于MIT开源协议， [点击跳转LICENSE](LICENSE) 
+项目起点为 [RMA-MUN/RAGNotebook](https://github.com/RMA-MUN/RAGNotebook)，当前版本围绕学习资料 RAG 的检索、原文溯源、回答核对、评测和界面进行了改进。保留上游作者信息与 [MIT License](LICENSE)。

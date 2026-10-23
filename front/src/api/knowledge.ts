@@ -8,6 +8,10 @@ interface KnowledgeListData {
 }
 
 export const knowledgeApi = {
+  retry: async (id: string) => {
+    const res = await client.post<ApiResponse<null>>(`/knowledge/documents/${encodeURIComponent(id)}/retry`)
+    return res.data
+  },
   list: async () => {
     const res = await client.get<ApiResponse<KnowledgeListData>>(endpoints.knowledgeList)
     return res.data

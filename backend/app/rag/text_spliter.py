@@ -5,6 +5,7 @@ from typing import Any
 from langchain.embeddings.base import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from app.rag.structured_splitter import split_structured_document
 from app.utils.config import document_config
 
 
@@ -78,7 +79,7 @@ class AsyncTextSplitter:
             List[Any]: 分割后的文档对象列表
         """
         # 使用递归字符分割器分割文档（同步操作，用to_thread包装）
-        split_docs = await asyncio.to_thread(self.splitter.split_documents, documents)
+        split_docs = await asyncio.to_thread(self.split_documents_sync, documents)
         return split_docs
 
     def split_documents_sync(self, documents: list[Any]) -> list[Any]:
@@ -91,7 +92,11 @@ class AsyncTextSplitter:
         Returns:
             List[Any]: 分割后的文档对象列表
         """
-        return self.splitter.split_documents(documents)
+        result = []
+        for document in documents:
+            chunks = split_structured_document(document, self.chunk_size, self.chunk_overlap, self.separators)
+            result.extend(self.splitter.split_documents([document]) if chunks is None else chunks)
+        return result
 
     def split_text_sync(self, text: str) -> list[str]:
         """

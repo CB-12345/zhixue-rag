@@ -1,0 +1,13 @@
+# Keep frozen evaluation JSON and Windows scripts byte-for-byte on checkout.
+*.json -text
+*.bat -text
+
+# Both LF and CRLF are valid in this Windows-developed repository.
+* whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+# Generated document samples and screenshots must be treated as binary.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.docx binary

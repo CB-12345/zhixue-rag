@@ -44,10 +44,11 @@ def service_factory(tmp_path, monkeypatch):
             pass
 
         async def execute(self, _stmt):
-            return SimpleNamespace(all=lambda: [])
+            return SimpleNamespace(all=lambda: [], scalars=lambda: [])
 
     # get_user_documents lazily imports this factory; keep all tests off real MySQL.
     monkeypatch.setattr("app.db.db_config.AsyncSessionLocal", EmptySession)
+    monkeypatch.setattr("app.graph.services.graph_service.AsyncSessionLocal", EmptySession)
 
     def _make(driver_records=None):
         service = object.__new__(VectorStoreService)
@@ -103,6 +104,17 @@ class TestGetUserDocuments:
 
 
 class TestGetDocumentDetail:
+    async def test_detail_and_chunks_preserve_persisted_non_contiguous_indexes(self, service_factory):
+        doc = {"id": "m1", "filename": "a.pdf", "user_id": "u1"}
+        service, _, _ = service_factory([
+            _rec(d=doc, c={"id": f"doc:m1:{index}", "chunk_index": index, "text": "fact", "page": 2})
+            for index in (3, 7)
+        ])
+        for result in (await service.get_document_detail("u1", "a.pdf"),
+                       await service.get_document_chunks("u1", "a.pdf")):
+            assert [chunk["index"] for chunk in result["chunks"]] == [3, 7]
+            assert [chunk["chunk_id"] for chunk in result["chunks"]] == ["doc:m1:3", "doc:m1:7"]
+
     def _records(self):
         doc = {"id": "m1", "user_id": "u1", "filename": "a.pdf", "created_at": 1}
         return [
@@ -188,7 +200,7 @@ class TestDeletions:
 
         calls = []
 
-        async def _fake_cleanup_all(user_id):
+        async def _fake_cleanup_all(user_id, *, strict=False):
             calls.append(user_id)
 
         monkeypatch.setattr("app.graph.services.graph_service.cleanup_all_docs_graph",
@@ -205,7 +217,7 @@ class TestDeletions:
 
         calls = []
 
-        async def _fake_cleanup(user_id, doc_id):
+        async def _fake_cleanup(user_id, doc_id, *, strict=False):
             calls.append((user_id, doc_id))
 
         monkeypatch.setattr("app.graph.services.graph_service.cleanup_doc_graph", _fake_cleanup)
@@ -224,10 +236,11 @@ class TestDeletions:
         fallback_calls = []
         normal_calls = []
 
-        async def _fake_cleanup_by_filename(user_id, filename):
+        async def _fake_cleanup_by_filename(user_id, filename, *, strict=False):
             fallback_calls.append((user_id, filename))
+            return []
 
-        async def _fake_cleanup(user_id, doc_id):
+        async def _fake_cleanup(user_id, doc_id, *, strict=False):
             normal_calls.append((user_id, doc_id))
 
         monkeypatch.setattr("app.graph.services.graph_service.cleanup_doc_graph_by_filename",
@@ -239,7 +252,8 @@ class TestDeletions:
         assert fallback_calls == [("u1", "nope.txt")] and normal_calls == []
 
         assert await service.delete_by_filename("u1", "a.txt") is True
-        assert normal_calls == [("u1", "m1")] and fallback_calls == [("u1", "nope.txt")]
+        assert normal_calls == [("u1", "m1")]
+        assert fallback_calls == [("u1", "nope.txt"), ("u1", "a.txt")]
 
     async def test_delete_single_md5(self, service_factory, monkeypatch):
         service, _, md5_store = service_factory()
@@ -248,7 +262,7 @@ class TestDeletions:
 
         calls = []
 
-        async def _fake_cleanup(user_id, doc_id):
+        async def _fake_cleanup(user_id, doc_id, *, strict=False):
             calls.append((user_id, doc_id))
 
         monkeypatch.setattr("app.graph.services.graph_service.cleanup_doc_graph", _fake_cleanup)

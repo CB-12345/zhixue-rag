@@ -16,7 +16,7 @@ export interface ThinkingStep {
 
 const retrievalStages = new Set(['local_retrieval', 'web_search', 'supplemental_retrieval'])
 const readableStatuses = new Set(['searching', 'empty', 'error', 'dedup', 'limit'])
-const visibleThinkingStages = new Set(['agentic_plan', ...retrievalStages])
+const visibleThinkingStages = new Set(['query_rewrite', 'agentic_plan', 'reorder', 'answer_verification', ...retrievalStages])
 
 export const EVIDENCE_PREVIEW_LENGTH = 200
 

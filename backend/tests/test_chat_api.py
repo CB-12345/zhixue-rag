@@ -3,6 +3,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 
+import pytest
 from fastapi import HTTPException
 
 from tests.fakes import TEST_USER_ID
@@ -15,6 +16,7 @@ async def _next_stream_chunk(response):
 @dataclass
 class FakeAgenticRagResult:
     context: str
+    refusal_message: str = ""
 
 
 class FakeChatService:
@@ -25,6 +27,9 @@ class FakeChatService:
 
     async def handle_get_session(self, session_id, user_id):
         return [("你好", "你好呀")]
+
+    async def handle_get_session_sources(self, session_id, user_id):
+        return []
 
     async def handle_get_pending_run_id(self, session_id, user_id):
         return None
@@ -80,6 +85,9 @@ async def test_get_session_includes_pending_run_id(client, monkeypatch):
 
         async def handle_get_session(self, session_id, user_id):
             return [("q", "a")]
+
+        async def handle_get_session_sources(self, session_id, user_id):
+            return []
 
         async def handle_get_pending_run_id(self, session_id, user_id):
             self.calls.append((session_id, user_id))
@@ -162,18 +170,19 @@ async def test_agent_query_stream_real_agentic_rag_pipeline(client, real_note_se
     assert response_frame["session_id"] == "sess-1"
 
 
-async def test_agent_query_stream_rag_error_continues_with_empty_context(client, monkeypatch):
-    """Agentic RAG 管线抛异常时，路由降级：不注入上下文、继续转发 Agent 流式响应。"""
+async def test_agent_query_stream_rag_error_requests_deterministic_refusal(client, monkeypatch):
+    """管线故障不能静默交给通用模型作答，仍复用 Agent 的会话及审批守卫。"""
     import app.router.chat as chat_module
 
     seen = {}
 
     class BrokenAgenticRagService:
-        async def run(self, query, user_id, thinking_callback=None):
+        async def run(self, query, user_id, thinking_callback=None, history=None):
             raise RuntimeError("管线内部故障")
 
     async def fake_agent_stream(query, session_id, user_id, custom_tools=None, rag_context="", **kwargs):
         seen["rag_context"] = rag_context
+        seen["rag_refusal"] = kwargs.get("rag_refusal")
         yield f'data: {json.dumps({"type": "response", "content": "降级回答", "session_id": session_id}, ensure_ascii=False)}\n\n'
         yield f'data: {json.dumps({"type": "done", "session_id": session_id}, ensure_ascii=False)}\n\n'
 
@@ -190,6 +199,7 @@ async def test_agent_query_stream_rag_error_continues_with_empty_context(client,
 
     frames = [json.loads(line[6:]) for line in lines if line.startswith("data: ")]
     assert seen["rag_context"] == ""
+    assert "资料核对" in seen["rag_refusal"]
     assert frames[-1]["type"] == "done"
 
 
@@ -200,7 +210,7 @@ async def test_agent_query_stream_with_rag(client, real_note_service, monkeypatc
     import app.router.chat as chat_module
 
     class FakeAgenticRagService:
-        async def run(self, query, user_id, thinking_callback=None):
+        async def run(self, query, user_id, thinking_callback=None, history=None):
             await thinking_callback({"type": "thinking", "stage": "local_retrieval", "content": "retrieved"})
             return FakeAgenticRagResult(context="[来源：知识库《RAG文档》]\n关于RAG的知识内容")
 
@@ -232,7 +242,7 @@ async def test_agent_query_stream_uses_agentic_rag_context_before_agent_response
     calls = []
 
     class FakeAgenticRagService:
-        async def run(self, query, user_id, thinking_callback=None):
+        async def run(self, query, user_id, thinking_callback=None, history=None):
             calls.append((query, user_id))
             await thinking_callback({"type": "thinking", "stage": "agentic_plan", "content": "planned"})
             return FakeAgenticRagResult(context="[来源：外部搜索《Result》]\nFresh fact")
@@ -263,6 +273,76 @@ async def test_agent_query_stream_uses_agentic_rag_context_before_agent_response
     assert "details" not in frames[1]
 
 
+async def test_follow_up_receives_only_current_session_history_and_keeps_original_query(client, monkeypatch):
+    import app.router.chat as chat_module
+
+    manager = chat_module.sm.session_manager
+    await manager.add_message("follow-up", TEST_USER_ID, "HYB-2048 的目标是什么？", "验证混合检索。")
+    await manager.add_message("unrelated", TEST_USER_ID, "不能读取的其他会话", "其他答案")
+    seen = {}
+
+    class FakeRag:
+        async def run(self, query, user_id, thinking_callback=None, history=None):
+            seen["history"] = history
+            return type("Result", (), {"context": "当前文档证据", "evidences": [], "refusal_message": "",
+                        "query_resolution": {"status": "resolved", "retrieval_query": "HYB-2048 的负责人是谁？"}})()
+
+    async def fake_agent(query, session_id, user_id, **kwargs):
+        seen["query"], seen["resolved"], seen["lock_held"] = query, kwargs["rag_resolved_query"], kwargs["_session_lock_held"]
+        yield 'data: {"type":"done"}\n\n'
+
+    monkeypatch.setattr(chat_module, "AgenticRagService", FakeRag)
+    monkeypatch.setattr(chat_module, "get_agent_stream_response", fake_agent)
+    response = await client.post("/chat/agent/query/stream", json={"query": "它的负责人呢？", "session_id": "follow-up"})
+    assert response.status_code == 200
+    assert seen["history"] == [("HYB-2048 的目标是什么？", "验证混合检索。")]
+    assert seen["query"] == "它的负责人呢？" and seen["resolved"] == "HYB-2048 的负责人是谁？"
+    assert seen["lock_held"] is True
+
+
+async def test_other_users_session_rejected_before_rag_starts(client, monkeypatch):
+    import app.router.chat as chat_module
+
+    await chat_module.sm.session_manager.add_message("private-follow-up", "different-owner", "私有问题", "私有回答")
+    def forbidden_rag():
+        raise AssertionError("不应启动检索")
+    monkeypatch.setattr(chat_module, "AgenticRagService", forbidden_rag)
+    response = await client.post("/chat/agent/query/stream", json={"query": "它的负责人呢？", "session_id": "private-follow-up"})
+    assert response.status_code == 403
+
+
+async def test_same_session_retrieval_waits_for_previous_answer(client, monkeypatch):
+    import app.router.chat as chat_module
+
+    first_answer_started, release_first, second_rag_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    seen = []
+    class FakeRag:
+        async def run(self, query, user_id, thinking_callback=None, history=None):
+            seen.append((query, history))
+            if query == "它的负责人呢？":
+                second_rag_started.set()
+            return FakeAgenticRagResult(context="资料")
+    async def fake_agent(query, session_id, user_id, **kwargs):
+        if query == "介绍 HYB-2048":
+            first_answer_started.set()
+            await release_first.wait()
+        await chat_module.sm.session_manager.add_message(session_id, user_id, query, "验证混合检索。")
+        yield 'data: {"type":"done"}\n\n'
+    monkeypatch.setattr(chat_module, "AgenticRagService", FakeRag)
+    monkeypatch.setattr(chat_module, "get_agent_stream_response", fake_agent)
+    first = asyncio.create_task(client.post("/chat/agent/query/stream", json={"query": "介绍 HYB-2048", "session_id": "serial-rag"}))
+    await asyncio.wait_for(first_answer_started.wait(), 2)
+    second = asyncio.create_task(client.post("/chat/agent/query/stream", json={"query": "它的负责人呢？", "session_id": "serial-rag"}))
+    try:
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(second_rag_started.wait(), 0.1)
+    finally:
+        release_first.set()
+        responses = await asyncio.wait_for(asyncio.gather(first, second), 5)
+    assert all(response.status_code == 200 for response in responses)
+    assert seen[-1][1] == [("介绍 HYB-2048", "验证混合检索。")]
+
+
 async def test_agent_query_stream_requires_auth(raw_client):
     async with raw_client.stream(
         "POST", "/chat/agent/query/stream", json={"query": "hi"},
@@ -270,14 +350,14 @@ async def test_agent_query_stream_requires_auth(raw_client):
         assert resp.status_code == 401
 
 
-async def test_agent_query_stream_emits_thinking_before_rag_finishes(monkeypatch):
+async def test_agent_query_stream_emits_thinking_before_rag_finishes(client, monkeypatch):
     from app.router.chat import query_stream
     from app.schemas.models import QueryRequest
 
     rag_finished = asyncio.Event()
 
     class FakeAgenticRagService:
-        async def run(self, query, user_id, thinking_callback=None):
+        async def run(self, query, user_id, thinking_callback=None, history=None):
             await thinking_callback({"type": "thinking", "stage": "agentic_plan", "content": "planned"})
             await rag_finished.wait()
             return FakeAgenticRagResult(context="complete context")
@@ -308,6 +388,59 @@ async def test_agent_query_stream_emits_thinking_before_rag_finishes(monkeypatch
 
     rag_finished.set()
     assert await asyncio.wait_for(_next_stream_chunk(response), timeout=0.2) == "agent response"
+    await response.body_iterator.aclose()
+
+
+async def test_cancelled_stream_cancels_rag_and_releases_conversation_lock(client, monkeypatch):
+    import app.router.chat as chat_module
+    from app.schemas.models import QueryRequest
+
+    started, cancelled = asyncio.Event(), asyncio.Event()
+    class WaitingRag:
+        async def run(self, query, user_id, thinking_callback=None, history=None):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+    monkeypatch.setattr(chat_module, "AgenticRagService", WaitingRag)
+    response = await chat_module.query_stream(QueryRequest(query="HYB-2048", session_id="cancel-follow-up"), TEST_USER_ID, None)
+    await _next_stream_chunk(response)
+    next_chunk = asyncio.create_task(_next_stream_chunk(response))
+    await asyncio.wait_for(started.wait(), 2)
+    next_chunk.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await next_chunk
+    await response.body_iterator.aclose()
+    assert cancelled.is_set()
+    assert not chat_module._get_session_lock(TEST_USER_ID, "cancel-follow-up").locked()
+
+
+async def test_closing_response_closes_nested_agent_stream_before_unlock(client, monkeypatch):
+    import app.router.chat as chat_module
+    from app.schemas.models import QueryRequest
+
+    closed = asyncio.Event()
+
+    class ReadyRag:
+        async def run(self, *args, **kwargs):
+            return FakeAgenticRagResult(context="fixture")
+
+    async def agent(*args, **kwargs):
+        try:
+            yield 'data: {"type":"response","content":"partial"}\n\n'
+            await asyncio.Event().wait()
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(chat_module, "AgenticRagService", ReadyRag)
+    monkeypatch.setattr(chat_module, "get_agent_stream_response", agent)
+    response = await chat_module.query_stream(QueryRequest(query="fixture", session_id="close-agent"), TEST_USER_ID, None)
+    await _next_stream_chunk(response)
+    assert "partial" in await _next_stream_chunk(response)
+    await response.body_iterator.aclose()
+    assert closed.is_set()
+    assert not chat_module._get_session_lock(TEST_USER_ID, "close-agent").locked()
 
 
 async def test_resume_endpoint_returns_error_when_no_pending(client, monkeypatch):

@@ -6,6 +6,9 @@ app/core/failed_response.py 从本模块 re-export settings，兼容既有导入
 环境变量加载时机：本模块被首次导入时实例化 Settings（读取 .env 与进程环境变量），
 测试若需运行时覆盖，直接 monkeypatch settings 属性或实例化 Settings(_env_file=None, **overrides)。
 """
+from typing import Literal
+
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -73,10 +76,31 @@ class Settings(BaseSettings):
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = ""
 
+    # 小型用户/类型范围内精确向量排序；大范围使用有界扩大的全局 ANN 候选。
+    VECTOR_EXACT_SCOPE_LIMIT: int = Field(default=2000, ge=0, le=10000)
+    VECTOR_ANN_MAX_CANDIDATES: int = Field(default=2048, ge=40, le=10000)
+
     # 云端重排序（rerank API）
+    RERANKER_PROVIDER: Literal["compatible", "dashscope"] = "compatible"
     RERANKER_API_BASE_URL: str = ""
     RERANKER_API_KEY: str = ""
     RERANKER_MODEL: str = ""
+    RERANKER_ENABLED: bool = True
+    RERANKER_TIMEOUT_SECONDS: float = Field(default=8.0, ge=0.1, le=60.0)
+    RERANKER_CANDIDATE_K: int = Field(default=20, ge=5, le=40)
+    # 重排后送入可答性核对的本地片段数；独立于召回候选数和最终融合的 8 条安全上限。
+    RAG_CONTEXT_K: int = Field(default=3, ge=1, le=8)
+
+    # 资料可答性核对的总等待时间；失败时不允许直接按模型常识作答。
+    ANSWERABILITY_TIMEOUT_SECONDS: float = Field(default=8.0, ge=0.1, le=60.0)
+    # 资料答案先缓冲再核对；异常时不发布未核实的草稿。
+    ANSWER_VERIFICATION_ENABLED: bool = True
+    ANSWER_VERIFICATION_TIMEOUT_SECONDS: float = Field(default=12.0, ge=0.1, le=60.0)
+    QUERY_REWRITE_TIMEOUT_SECONDS: float = Field(default=4.0, ge=0.1, le=15.0)
+    # 图谱是补充检索：预算耗尽后继续使用文本证据，仍需通过可答性核对。
+    GRAPH_RETRIEVAL_TIMEOUT_SECONDS: float = Field(default=4.0, ge=0.1, le=60.0)
+    # 首次回答/审批恢复的 Agent 执行预算（含模型与工具，不含前置检索）。
+    AGENT_RUN_TIMEOUT_SECONDS: float = Field(default=60.0, ge=0.1, le=180.0)
 
     # 限流全局开关
     RATE_LIMIT_ENABLED: bool = True

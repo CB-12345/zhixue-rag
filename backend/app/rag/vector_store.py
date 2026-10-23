@@ -104,6 +104,25 @@ class VectorStoreService:
             records = []
 
         preview_length = 100
+        task_states = {}
+        try:
+            from app.models.graph import GraphBuildTask
+
+            async with AsyncSessionLocal() as db:
+                stmt = select(GraphBuildTask).where(
+                    GraphBuildTask.source_type == "doc")
+                if user_id is not None:
+                    stmt = stmt.where(GraphBuildTask.user_id == user_id)
+                for task in (await db.execute(stmt)).scalars():
+                    task_states[task.source_id] = {
+                        "status": task.index_status, "attempts": task.index_attempts,
+                        "graph_status": task.status if task.index_status == "completed" else "waiting",
+                        "graph_attempts": task.attempts,
+                        "error_message": "索引失败，请检查向量模型连接后重试" if task.index_status == "failed" else None,
+                        "graph_error_message": "图谱构建失败，基础检索仍可使用" if task.status == "failed" else None,
+                    }
+        except Exception as e:
+            logger.error(f"【知识库】读取处理状态失败: {e}")
 
         def _entry(doc_id: str, filename: str, user, chunk_count: int, preview: str, created_at) -> dict:
             return {
@@ -114,6 +133,8 @@ class VectorStoreService:
                 "chunk_count": chunk_count,
                 "preview": (preview or "")[:preview_length] + ("..." if len(preview or "") > preview_length else ""),
                 "created_at": created_at.isoformat() if created_at else None,
+                **task_states.get(doc_id, {"status": "completed" if chunk_count else "unknown",
+                                          "attempts": 0, "graph_status": "unknown"}),
             }
 
         docs_info: list[dict] = []
@@ -168,7 +189,7 @@ class VectorStoreService:
             all_images.update(chunk_images)
             chunks.append({
                 "chunk_id": chunk["id"],
-                "index": index,
+                "index": chunk["chunk_index"] if chunk.get("chunk_index") is not None else index,
                 "content": text,
                 "page": chunk.get("page"),
                 "images": chunk_images,
@@ -208,7 +229,7 @@ class VectorStoreService:
             doc_md5 = row["d"]["id"]
             chunks.append({
                 "chunk_id": chunk["id"],
-                "index": index,
+                "index": chunk["chunk_index"] if chunk.get("chunk_index") is not None else index,
                 "content": chunk.get("text") or "",
                 "metadata": {"md5": doc_md5, "page": chunk.get("page"),
                              "user_id": row["d"].get("user_id")},
@@ -231,87 +252,49 @@ class VectorStoreService:
             raise
 
     async def delete_user_md5(self, user_id: str, delete_documents: bool = True):
-        """删除指定用户的MD5记录（delete_documents 时联动清理 Neo4j 文档图谱）。"""
-        try:
-            if delete_documents:
-                logger.info(f"【知识库】删除用户 {user_id} 的所有文档")
-                await self.md5_store.delete_user_md5(user_id)
-                # 同步清理该用户在磁盘上存储的所有 PDF 提取图片
-                delete_user_all_images(user_id)
-                # 图谱联动：清空该用户的文档节点/Chunk/关联/抽取日志（失败不影响删除主流程）
-                try:
-                    from app.graph.services.graph_service import cleanup_all_docs_graph
-                    await cleanup_all_docs_graph(user_id)
-                except Exception as e:
-                    logger.error(f"【图谱】清空用户 {user_id} 文档图谱数据失败: {e}")
-        except Exception as e:
-            logger.error(f"【知识库】删除用户 {user_id} 的MD5记录时出错: {e}")
+        """检索内容清理成功后再删除兼容记录；连接故障应提示重试。"""
+        if delete_documents:
+            from app.graph.services.graph_service import cleanup_all_docs_graph
+            try:
+                await cleanup_all_docs_graph(user_id, strict=True)
+            except Exception as exc:
+                from fastapi import HTTPException
+                raise HTTPException(503, "检索存储清理失败，文档尚未全部删除，请稍后重试") from exc
+            delete_user_all_images(user_id)
+        await self.md5_store.delete_user_md5(user_id)
 
     async def delete_by_filename(self, user_id: str, filename: str, delete_documents: bool = True):
-        """通过文件名删除MD5记录及其对应的知识库内容（Neo4j 图谱联动）。"""
-        try:
-            md5_to_delete = await self.md5_store.delete_by_filename(user_id, filename)
-            if md5_to_delete is None:
-                logger.warning(f"【知识库】文件 {filename} 不存在于用户 {user_id} 的MD5记录中")
-                # 兜底：md5 记录缺失（历史残留/记录文件丢失）时仍按文件名清理图谱，防残留
-                if delete_documents:
-                    try:
-                        from app.graph.services.graph_service import cleanup_doc_graph_by_filename
-                        await cleanup_doc_graph_by_filename(user_id, filename)
-                    except Exception as e:
-                        logger.error(f"【图谱】按文件名清理文档图谱失败 {filename}: {e}")
-                return False
-
-            logger.info(f"【知识库】已删除用户 {user_id} 的文件 {filename} 的MD5记录")
-
-            if delete_documents:
-                # 删除该文档对应的 PDF 提取图片目录
-                delete_image_directory(user_id, md5_to_delete)
-                # 图谱联动：清理该文档的节点/Chunk/关联/抽取日志（失败不影响删除主流程）
-                try:
-                    from app.graph.services.graph_service import cleanup_doc_graph
-                    await cleanup_doc_graph(user_id, md5_to_delete)
-                except Exception as e:
-                    logger.error(f"【图谱】清理文档 {filename} 图谱数据失败: {e}")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"【知识库】删除用户 {user_id} 的文件 {filename} 时出错: {e}")
-            return False
+        """清理全部同名历史来源，兼容 MD5 文件缺失和历史重复注册。"""
+        records = await self.get_all_md5_records(user_id)
+        ids = {r["md5"] for r in records
+               if r.get("filename", r.get("original_filename")) == filename}
+        if delete_documents:
+            from app.graph.services.graph_service import cleanup_doc_graph, cleanup_doc_graph_by_filename
+            try:
+                deleted = set(await cleanup_doc_graph_by_filename(user_id, filename, strict=True))
+                for doc_id in ids - deleted:
+                    await cleanup_doc_graph(user_id, doc_id, strict=True)
+                ids.update(deleted)
+            except Exception as exc:
+                from fastapi import HTTPException
+                raise HTTPException(503, "文档清理失败，请稍后重试删除") from exc
+            for doc_id in ids:
+                delete_image_directory(user_id, doc_id)
+        await self.md5_store.delete_by_filename(user_id, filename)
+        return bool(ids)
 
     async def delete_single_md5(self, user_id: str, md5_to_delete: str, delete_documents: bool = True):
-        """删除单个MD5记录及其对应的知识库内容（Neo4j 图谱联动）。"""
-        try:
-            success = await self.md5_store.delete_single_md5(user_id, md5_to_delete)
-            if not success:
-                logger.warning(f"【知识库】MD5记录 {md5_to_delete} 不存在")
-                # 兜底：md5 记录缺失但图谱可能仍有该文档 → 仍清理，防残留
-                if delete_documents:
-                    try:
-                        from app.graph.services.graph_service import cleanup_doc_graph
-                        await cleanup_doc_graph(user_id, md5_to_delete)
-                    except Exception as e:
-                        logger.error(f"【图谱】清理文档 {md5_to_delete} 图谱数据失败: {e}")
-                return False
-
-            logger.info(f"【知识库】已删除用户 {user_id} 的MD5记录: {md5_to_delete}")
-
-            if delete_documents:
-                # 清理磁盘上该用户的 PDF 提取图片
-                delete_image_directory(user_id, md5_to_delete)
-                # 图谱联动：清理该文档的节点/Chunk/关联/抽取日志（失败不影响删除主流程）
-                try:
-                    from app.graph.services.graph_service import cleanup_doc_graph
-                    await cleanup_doc_graph(user_id, md5_to_delete)
-                except Exception as e:
-                    logger.error(f"【图谱】清理文档 {md5_to_delete} 图谱数据失败: {e}")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"【知识库】删除用户 {user_id} 的MD5记录 {md5_to_delete} 时出错: {e}")
-            return False
+        exists = await self.get_md5_info(user_id, md5_to_delete) is not None
+        if delete_documents:
+            from app.graph.services.graph_service import cleanup_doc_graph
+            try:
+                await cleanup_doc_graph(user_id, md5_to_delete, strict=True)
+            except Exception as exc:
+                from fastapi import HTTPException
+                raise HTTPException(503, "文档清理失败，请稍后重试删除") from exc
+            delete_image_directory(user_id, md5_to_delete)
+        await self.md5_store.delete_single_md5(user_id, md5_to_delete)
+        return exists
 
     # ---- MD5 记录（上传去重） ----
     async def check_md5_hex(self, md5_for_check: str, user_id: str = None) -> bool:
@@ -324,22 +307,24 @@ class VectorStoreService:
         self.md5_store.save_md5_hex_sync(md5_hex, filename, original_filename, user_id)
 
     async def get_md5_info(self, user_id: str, md5_value: str):
-        """获取MD5对应的文档信息，不存在返回None。"""
-        try:
-            return await self.md5_store.get_md5_info(user_id, md5_value)
-        except Exception as e:
-            logger.error(f"【知识库】获取MD5信息 {md5_value} 时出错: {e}")
-            return None
+        return next((r for r in await self.get_all_md5_records(user_id)
+                     if r["md5"] == md5_value), None)
 
     async def get_all_md5_records(self, user_id: str):
-        """获取用户的所有MD5记录。"""
-        try:
-            records = await self.md5_store.get_all_md5_records(user_id)
-            logger.info(f"【知识库】获取用户 {user_id} 的MD5记录，共 {len(records)} 条")
-            return records
-        except Exception as e:
-            logger.error(f"【知识库】获取用户 {user_id} 的MD5记录时出错: {e}")
-            return []
+        """优先展示持久化注册行；合并旧文件记录以兼容历史数据。"""
+        from sqlalchemy import select
+
+        from app.db.db_config import AsyncSessionLocal
+        from app.models.graph import GraphDoc
+
+        records = {r["md5"]: r for r in await self.md5_store.get_all_md5_records(user_id)}
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(select(GraphDoc.id, GraphDoc.filename, GraphDoc.created_at).where(
+                GraphDoc.user_id == user_id))).all()
+        for doc_id, filename, created_at in rows:
+            records[doc_id] = {"md5": doc_id, "filename": filename, "original_filename": filename,
+                               "upload_time": created_at.isoformat() if created_at else None}
+        return list(records.values())
 
     # ---- 文档加载与切片（上传管线） ----
     async def get_file_document(self, read_path: str, md5: str = None, user_id: str = None) -> list[Document]:

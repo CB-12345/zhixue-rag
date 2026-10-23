@@ -12,9 +12,12 @@
 驱动由 neo4j_client.get_neo4j_driver() 提供，store 自身无状态、可安全并发复用。
 """
 import json
+import math
 import re
 import uuid
 
+from app.core.logger_handler import logger
+from app.core.settings import settings
 from app.graph.schemas.graph import (
     ChunkHit,
     Entity,
@@ -65,6 +68,26 @@ def _to_type(node) -> EntityType:
 def _union(a: list | None, b: list | None) -> list:
     """列表去重并集（保序），容忍 None——重复抽取的 aliases/source_note_ids 合并语义。"""
     return list(dict.fromkeys(list(a or []) + list(b or [])))
+
+
+_UPSERT_CHUNKS = (
+    "UNWIND $rows AS row "
+    "MERGE (c:Chunk {id: row.id, user_id: row.user_id}) "
+    "SET c.kind = row.kind, c.source_id = row.source_id, "
+    "c.source_name = row.source_name, c.chunk_index = row.chunk_index, c.text = row.text, "
+    "c.embedding = row.embedding, c.page = row.page, c.image_paths = row.image_paths"
+)
+
+
+def _chunk_rows(user_id: str, source_type: str, source_id: str, source_name: str,
+                chunks: list[dict]) -> list[dict]:
+    return [{
+        "id": f"{source_type}:{source_id}:{chunk['chunk_index']}",
+        "user_id": user_id, "kind": source_type, "source_id": source_id,
+        "source_name": source_name, "chunk_index": chunk["chunk_index"],
+        "text": chunk["text"], "embedding": chunk.get("embedding"),
+        "page": chunk.get("page"), "image_paths": chunk.get("image_paths"),
+    } for chunk in chunks]
 
 
 class Neo4jGraphStore(GraphStore):
@@ -558,24 +581,20 @@ class Neo4jGraphStore(GraphStore):
 
         文档 source_id 是 md5 跨用户可重复，id 不含 user_id 时会互相覆盖——隔离全靠复合 MERGE 键。
         """
-        rows = []
-        for chunk in chunks:
-            rows.append({
-                "id": f"{source_type}:{source_id}:{chunk['chunk_index']}",
-                "user_id": user_id, "kind": source_type, "source_id": source_id,
-                "source_name": source_name, "chunk_index": chunk["chunk_index"],
-                "text": chunk["text"], "embedding": chunk.get("embedding"),
-                "page": chunk.get("page"), "image_paths": chunk.get("image_paths"),
-            })
-        if not rows:
-            return
-        await self._run(
-            "UNWIND $rows AS row "
-            "MERGE (c:Chunk {id: row.id, user_id: row.user_id}) "
-            "SET c.kind = row.kind, c.source_id = row.source_id, "
-            "c.source_name = row.source_name, c.chunk_index = row.chunk_index, c.text = row.text, "
-            "c.embedding = row.embedding, c.page = row.page, c.image_paths = row.image_paths",
-            {"rows": rows},
+        rows = _chunk_rows(user_id, source_type, source_id, source_name, chunks)
+        if rows:
+            await self._run(_UPSERT_CHUNKS, {"rows": rows})
+
+    async def replace_chunks(self, user_id: str, source_type: str, source_id: str, source_name: str,
+                             chunks: list[dict]) -> None:
+        """在同一事务中删除不再存在的切片并写入完整新集合，失败时整体回滚。"""
+        rows = _chunk_rows(user_id, source_type, source_id, source_name, chunks)
+        await self._tx(
+            ("MATCH (c:Chunk {user_id: $uid, kind: $kind, source_id: $sid}) "
+             "WHERE NOT c.id IN $ids DETACH DELETE c",
+             {"uid": user_id, "kind": source_type, "sid": source_id,
+              "ids": [row["id"] for row in rows]}),
+            (_UPSERT_CHUNKS, {"rows": rows}),
         )
 
     async def delete_chunks_by_source(self, user_id: str, source_type: str, source_id: str) -> None:
@@ -671,9 +690,51 @@ class Neo4jGraphStore(GraphStore):
             {"rows": rows, "nid": note_id, "uid": user_id},
         )
 
+    async def _vector_candidates(self, user_id: str, embedding: list[float],
+                                 kinds: list[str] | None, pool: int) -> tuple[list[dict], dict]:
+        """小范围先按用户/类型过滤再精排；大范围限制 ANN 扩大的查询次数与候选预算。"""
+        if (not embedding or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in embedding)
+                or not any(embedding)):
+            return [], {}
+        scope = ("node.user_id=$uid AND (size($kinds)=0 OR node.kind IN $kinds) "
+                 "AND size(node.embedding)=size($embedding) "
+                 "AND all(value IN node.embedding WHERE value IS NOT NULL) "
+                 "AND any(value IN node.embedding WHERE value <> 0.0) ")
+        params = {"uid": user_id, "kinds": kinds or [], "embedding": embedding, "pool": pool}
+        exact_limit = settings.VECTOR_EXACT_SCOPE_LIMIT
+        # 只探测阈值+1条，不为每个问题完整统计大用户的全部切片。
+        probe = await self._run(
+            f"MATCH (node:Chunk) WHERE {scope} WITH node LIMIT $probe_limit RETURN count(node) AS count",
+            {**params, "probe_limit": exact_limit + 1})
+        count = probe[0]["count"]
+        if not count:
+            return [], {}
+        if count <= exact_limit:
+            rows = await self._run(
+                f"MATCH (node:Chunk) WHERE {scope} "
+                "WITH node, vector.similarity.cosine(node.embedding, $embedding) AS score "
+                "RETURN node.id AS id, score ORDER BY score DESC, id LIMIT $pool", params)
+            return rows, {"vector_search_mode": "scoped_exact", "vector_scope_count": count}
+
+        max_k = max(pool, settings.VECTOR_ANN_MAX_CANDIDATES)
+        candidate_k = pool
+        while True:
+            rows = await self._run(
+                "CALL db.index.vector.queryNodes('chunk_embedding_index', $candidate_k, $embedding) "
+                f"YIELD node, score WHERE {scope} "
+                "RETURN node.id AS id, score ORDER BY score DESC, id LIMIT $pool",
+                {**params, "candidate_k": candidate_k})
+            filled = len(rows) >= pool
+            if filled or candidate_k >= max_k:
+                logger.info(f"【向量召回】mode=global_ann candidate_k={candidate_k} hits={len(rows)} target={pool} filled={filled}")
+                return rows, {"vector_search_mode": "global_ann", "vector_candidate_k": candidate_k,
+                              "vector_pool_filled": filled}
+            # 使用本轮完整排名，避免在多次扩大中给同一命中重复计 RRF 分数。
+            candidate_k = min(max_k, candidate_k * 4)
+
     async def search_chunks(self, user_id: str, query_embedding: list[float] | None,
                             text_query: str | None, kinds: list[str] | None, limit: int) -> list[ChunkHit]:
-        """Chunk 混合检索：向量 + 全文两路各取 2×limit 候选，RRF（k=60）融合排序取 top limit。
+        """向量与全文各取 2×limit 候选后 RRF（k=60）融合；向量召回按用户/类型范围选择策略。
 
         embedding 为 None（query 向量化失败）时退化为纯全文检索；score 返回 RRF 融合分，
         原始两路分数放在 metadata 供前端展示。
@@ -685,15 +746,10 @@ class Neo4jGraphStore(GraphStore):
         raw_scores: dict[str, dict] = {}
 
         if query_embedding:
-            rows = await self._run(
-                "CALL db.index.vector.queryNodes('chunk_embedding_index', $k, $embedding) "
-                f"YIELD node, score WHERE node.user_id = $uid {kind_filter} "
-                "RETURN node.id AS id, score",
-                {"k": pool, "embedding": query_embedding, "uid": user_id, "kinds": kinds or []},
-            )
+            rows, vector_metadata = await self._vector_candidates(user_id, query_embedding, kinds, pool)
             for rank, row in enumerate(rows, start=1):
                 rrf[row["id"]] = rrf.get(row["id"], 0.0) + 1.0 / (60 + rank)
-                raw_scores.setdefault(row["id"], {})["vector_score"] = row["score"]
+                raw_scores.setdefault(row["id"], {}).update(vector_metadata, vector_score=row["score"])
 
         if text_query:
             cleaned = _LUCENE_SPECIALS.sub(" ", text_query).strip()
@@ -723,6 +779,7 @@ class Neo4jGraphStore(GraphStore):
             hits.append(ChunkHit(
                 id=cid, kind=node.get("kind") or "doc", source_id=node.get("source_id") or "",
                 source_name=node.get("source_name"), chunk_index=node.get("chunk_index") or 0,
+                page=node.get("page"),
                 text=node.get("text") or "", score=rrf[cid], metadata=raw_scores.get(cid, {})))
         return hits
 
@@ -742,6 +799,7 @@ class Neo4jGraphStore(GraphStore):
             id=row["c"]["id"], kind=row["c"].get("kind") or "doc",
             source_id=row["c"].get("source_id") or "", source_name=row["c"].get("source_name"),
             chunk_index=row["c"].get("chunk_index") or 0, text=row["c"].get("text") or "",
+            page=row["c"].get("page"),
             score=None, metadata={"via": "mentions"}) for row in rows]
 
     async def clear_source_data(self, user_id: str, source_type: str, source_id: str) -> list[str]:

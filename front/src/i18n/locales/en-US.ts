@@ -1,9 +1,15 @@
 const enUS = {
-  app: { name: '云笺集' },
+  app: {
+    name: '智学',
+    subtitle: 'AI Learning Assistant',
+    tagline: 'Make every learning moment count',
+    workspace: 'Your workspace',
+  },
   nav: {
     notes: 'Notes',
     chat: 'AI Chat',
     sessions: 'Sessions',
+    more: 'More features',
     review: 'Daily Review',
     knowledge: 'Knowledge Base',
     graph: 'Knowledge Graph',
@@ -28,6 +34,10 @@ const enUS = {
     hasAccount: 'Already have an account?',
     testAccount: 'Use test account',
     passwordLength: 'Password must be at least 6 characters',
+    loginHint: 'Sign in to continue learning',
+    registerHint: 'Start your learning journey',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
   },
   note: {
     title: 'Notes',
@@ -57,7 +67,7 @@ const enUS = {
     },
   },
   chat: {
-    title: 'AI Assistant',
+    title: 'Zhixue Assistant',
     input: 'Type your question...',
     send: 'Send',
     newSession: 'New Session',
@@ -67,7 +77,8 @@ const enUS = {
     hyde: 'HyDE document embedding',
     reorder: 'Reordering documents',
     summarize: 'Generating answer',
-    welcome: "Hello! I'm your AI assistant. How can I help you?",
+    welcome: "Hi, I'm Zhixue. What would you like to learn today?",
+    welcomeDescription: 'Explore your notes and documents to connect ideas and find answers.',
     quickQuestions: 'Quick Questions',
   },
   knowledge: {
@@ -76,7 +87,7 @@ const enUS = {
     dragDrop: 'Drag and drop files here, or click to select',
     fileTypes: 'Supports PDF, TXT, Markdown, Word, PPT',
     uploading: 'Uploading',
-    success: 'Upload successful',
+    success: 'Uploaded. Building the search index in the background.',
     fail: 'Upload failed',
     deleteConfirm: 'Are you sure you want to delete this document?',
     cleanAll: 'Clean All',
@@ -103,7 +114,7 @@ const enUS = {
   settings: {
     title: 'Settings',
     theme: 'Theme',
-    light: 'Light Mode',
+    light: 'Light Blue',
     dark: 'Dark Mode',
     language: 'Language',
   },
@@ -132,7 +143,7 @@ const enUS = {
   },
   about: {
     title: 'About',
-    description: '云笺集 is an intelligent note-taking and knowledge management platform that leverages AI and knowledge graph capabilities to help you better record, organize, and review knowledge.',
+    description: 'Zhixue is your AI learning assistant. Organize documents and notes into a personal knowledge base, ask questions, explore sources, and connect what you learn.',
     techStack: 'Tech Stack',
     features: 'Features',
     featureList: {
@@ -145,6 +156,7 @@ const enUS = {
     github: 'GitHub Repository',
   },
   common: {
+    close: 'Close',
     loading: 'Loading...',
     error: 'Something went wrong',
     retry: 'Retry',

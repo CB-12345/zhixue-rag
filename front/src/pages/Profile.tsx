@@ -146,7 +146,7 @@ export default function Profile() {
             <button onClick={() => setEditing(false)} className="px-4 py-2 text-sm rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)] transition-colors">
               <X size={14} className="inline mr-1" />{t('profile.cancel')}
             </button>
-            <button onClick={handleSave} disabled={loading} className="px-4 py-2 text-sm rounded-md bg-[var(--color-accent)] text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+            <button onClick={handleSave} disabled={loading} className="px-4 py-2 text-sm rounded-md bg-[var(--color-action)] text-white hover:bg-[var(--color-action-hover)] disabled:opacity-50 transition-colors">
               <Save size={14} className="inline mr-1" />{t('profile.save')}
             </button>
           </div>
@@ -291,7 +291,7 @@ export default function Profile() {
               <button
                 onClick={handlePasswordChange}
                 disabled={pwdLoading}
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--color-accent)] text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--color-action)] text-white hover:bg-[var(--color-action-hover)] disabled:opacity-50 transition-colors"
               >
                 {pwdLoading ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

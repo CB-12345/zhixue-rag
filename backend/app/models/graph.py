@@ -104,15 +104,15 @@ class GraphDoc(Base):
     __tablename__ = "graph_docs"
 
     id = Column(String(36), primary_key=True, comment="文档 md5")
-    user_id = Column(String(36), index=True, nullable=False)
+    user_id = Column(String(36), primary_key=True, index=True, nullable=False)
     filename = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class GraphBuildTask(Base):
-    """图谱构建任务表：worker 异步消费（pending → running → completed/failed）。
+    """来源构建任务表：基础索引和图谱各自 pending → running → completed/failed。
 
-    payload 为 JSON 字符串：笔记 {"text": 正文}；文档 {"chunks": [{text, page?, image_paths?}]}
+    payload 为 JSON 字符串：笔记 {"text": 正文}；文档 {"text": 正文, "chunks": [{text, page?, image_paths?}]}
     或 {"text": 全文}（无预切切片时由 worker 兜底现切）。
     run_token 为认领令牌：worker 认领时生成并写入，执行方在写图谱数据与回写状态前
     校验令牌未被替换——期间任务被重新入队（编辑触发/force）则旧执行自愿中止，
@@ -139,3 +139,10 @@ class GraphBuildTask(Base):
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # 基础检索与图谱各自认领、重试；图谱只消费索引已完成的版本。
+    index_status = Column(String(20), default="pending", server_default="pending", nullable=False)
+    index_attempts = Column(Integer, default=0, server_default="0", nullable=False)
+    index_run_token = Column(String(36), nullable=True)
+    index_error_message = Column(Text, nullable=True)
+    indexed_hash = Column(String(64), nullable=True)

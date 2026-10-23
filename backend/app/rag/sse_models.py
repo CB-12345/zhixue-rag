@@ -19,6 +19,7 @@ class SSEEvent:
     failed_count: int = 0
     slice_success_count: int = 0
     error_message: str | None = None
+    status_code: int | None = None
     chunk_count: int | None = None
 
     def to_sse(self) -> str:

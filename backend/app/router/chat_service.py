@@ -20,6 +20,10 @@ class ChatService:
         """处理获取会话待审批 run_id 逻辑"""
         return await sm.session_manager.get_pending_run_id(session_id, user_id)
 
+    async def handle_get_session_sources(self, session_id: str, user_id: str) -> list[list[dict]]:
+        data = await sm.session_manager.get_session(session_id, user_id, include_sources=True)
+        return data.get("sources", [])
+
     async def handle_delete_session(self, session_id: str, user_id: str) -> None:
         """处理删除会话逻辑"""
         await sm.session_manager.clear_session(session_id, user_id)

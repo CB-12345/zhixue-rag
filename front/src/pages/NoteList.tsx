@@ -344,7 +344,7 @@ export default function NoteList() {
         {!selectMode && (
           <button
             onClick={() => navigate('/notes/new')}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--color-accent)] text-white text-sm hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--color-action)] text-white text-sm hover:bg-[var(--color-action-hover)] transition-colors"
           >
             <Plus size={16} />
             {t('note.newNote')}
@@ -420,7 +420,7 @@ export default function NoteList() {
           icon={<FileText size={48} />}
           message={t('note.empty')}
           action={
-            <button onClick={() => navigate('/notes/new')} className="px-4 py-2 text-sm rounded-md bg-[var(--color-accent)] text-white">
+            <button onClick={() => navigate('/notes/new')} className="px-4 py-2 text-sm rounded-md bg-[var(--color-action)] text-white">
               {t('note.newNote')}
             </button>
           }
@@ -576,7 +576,7 @@ function CategoryModal({
             <button
               onClick={() => { if (customCategory.trim()) onSelect(customCategory.trim()) }}
               disabled={!customCategory.trim()}
-              className="px-4 py-1.5 text-sm rounded-md bg-[var(--color-accent)] text-white disabled:opacity-40 transition-opacity"
+              className="px-4 py-1.5 text-sm rounded-md bg-[var(--color-action)] text-white disabled:opacity-40 transition-opacity"
             >
               {t('common.confirm')}
             </button>

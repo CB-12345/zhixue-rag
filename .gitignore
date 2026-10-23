@@ -1,113 +1,67 @@
-# Python
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+
+# Python environments, bytecode and tooling
 __pycache__/
 *.py[cod]
-*$py.class
-
-# node
-node_modules/
-dist/
-
-
-# Virtual Environment
 .venv/
-env/
 venv/
+env/
 ENV/
-env.bak/
-venv.bak/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-.trae
-.mimocode
-*~
-
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# OS
-Thumbs.db
-.DS_Store
-
-# Logs
-logs
-*.log
-data/
-media/
-
-# Database
-*.db
-*.sqlite3
-migrations/
-
-# Build artifacts
-build/
-dist/
 *.egg-info/
-
-# Testing
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 .coverage
 .coverage.*
-.cache
-test/
+htmlcov/
 
-# Misc
-*.pem
+# Frontend dependencies and build output
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
 
-# LangChain specific
-langchain-*/
+# Local application data, uploaded material and generated reports
+/backend/data/
+/backend/media/
+/backend/logs/
+/backend/results/
+/backend/openapi.json
+/output/
+/tmp/
+/LOCAL_SETUP.md
+*.log
+*.db
+*.sqlite3
 
-# ChromaDB
-chromadb/
-
-# Jupyter notebooks
-.ipynb_checkpoints/
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
+# Editors, OS and scratch workspaces
+.idea/
+.vscode/
+.trae/
+.mimocode/
 .opencode/
 .omo/
-
-# Windows
-Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# Linux
-*~
-
-# Temporary files
-*.tmp
-*.temp
-
-# AI agent/Claude config
+.zcode/
 .agents/
 .claude/
-skills-lock.json
-
-# CodeGraph index
 .codegraph/
-
-# SDD plan workspaces (scratch, per-plan ledger/briefs/reports)
 .superpowers/
-
-# Superpowers design and implementation notes
+skills-lock.json
 docs/superpowers/
-
-
-# AI 工具工作区
-.zcode/
+.DS_Store
+Thumbs.db
+ehthumbs.db
+*.swp
+*.swo
+*~
+*.tmp
+*.temp
+.ipynb_checkpoints/

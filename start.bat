@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ============================================================
-echo   RAG NoteBook Docker 一键启动
+echo   智学 AI 学习助手 Docker 一键启动
 echo ============================================================
 echo.
 
@@ -54,7 +54,7 @@ echo.
 echo   前端页面:    http://localhost:3000    （默认账号 admin / admin1234）
 echo   后端 API:    http://localhost:8000/docs
 echo.
-echo   修改 backend\.env 中的模型 Key 后，执行 docker compose restart backend 即可生效。
+echo   修改 backend\.env 中的模型 Key 后，执行 docker compose up -d --force-recreate backend 即可生效。
 echo   数据已持久化在 Docker 数据卷与 backend\ 目录，重启/重建容器不会丢失。
 echo.
 start "" http://localhost:3000

@@ -31,7 +31,7 @@ async def add_vector_single(
 ):
     """上传文件，将文件保存到向量数据库，仅支持TXT和PDF"""
     filename = await knowledge_service.handle_add_vector_single(file, user_id)
-    return success_response(message=f"文件 {filename} 已成功上传并存储到向量数据库")
+    return success_response(message=f"文件 {filename} 已接收，请在知识库查看索引状态")
 
 
 @knowledge_router.post("/add/multiple")
@@ -43,7 +43,7 @@ async def add_vector_multiple(
 ):
     """上传多个文件，将文件保存到向量数据库，仅支持TXT和PDF"""
     filenames = await knowledge_service.handle_add_vector_multiple(files, user_id)
-    return success_response(message=f"文件 {filenames} 已成功上传并存储到向量数据库")
+    return success_response(message=f"文件 {filenames} 已接收，请在知识库查看索引状态")
 
 
 @knowledge_router.post("/add/multiple/stream")
@@ -163,6 +163,14 @@ async def get_md5_info(
         return success_response(data=md5_info)
     else:
         raise HTTPException(status_code=404, detail=f"MD5记录 {md5_value} 不存在")
+
+
+@knowledge_router.post("/documents/{doc_id}/retry")
+async def retry_document_build(doc_id: str, user_id: str = Depends(get_current_user_id)):
+    from app.graph.services.graph_service import retry_document
+
+    await retry_document(user_id, doc_id)
+    return success_response(message="已重新加入处理队列")
 
 
 @knowledge_router.get("/list", response_model=KnowledgeListResponse)

@@ -39,11 +39,34 @@ def normalize_query(query: str) -> str:
     return re.sub(r"[\s，。！？!?、；：:;，,．.、'\"“”‘’（）()【】\[\]]+", "", query).lower()
 
 
-def init_rag_guard(rag_searched_queries: list[str] | None) -> None:
+def init_rag_guard(rag_searched_queries: list[str] | None, sources: list[dict] | None = None) -> None:
     """初始化请求级护栏：searched 预置前置管线已检索的 query（字符归一化后）。"""
     rag_guard_var.set(
-        {"count": 0, "searched": {normalize_query(q) for q in (rag_searched_queries or [])}}
+        {"count": 0, "searched": {normalize_query(q) for q in (rag_searched_queries or [])}, "sources": sources}
     )
+
+
+def _register_supplementary_sources(evidences, registry):
+    """One numbering scheme for prompt, verification, UI and stored history."""
+    from app.rag.agentic_rag.evidence import _SOURCE_LABELS
+    from app.rag.agentic_rag.sources import public_sources
+
+    parts = []
+    for source in public_sources(evidences):
+        existing = next((s for s in registry if (s["source"], s["id"], s["content"]) ==
+                         (source["source"], source["id"], source["content"])), None)
+        if existing is None:
+            if len(registry) >= 24 or sum(len(s["content"]) for s in registry) + len(source["content"]) > 20000:
+                break
+            source["number"] = max((s["number"] for s in registry), default=0) + 1
+            registry.append(source)
+        else:
+            source = existing
+        header = f'[{source["number"]}] 来源：{_SOURCE_LABELS[source["source"]]}《{source["title"]}》'
+        if source.get("page"):
+            header += f'（第 {source["page"]} 页）'
+        parts.append(header + "\n" + source["content"])
+    return "\n\n".join(parts)
 
 
 def _format_supplementary_retrieval(
@@ -191,10 +214,13 @@ async def search_rag(query: str) -> str:
         if inspect.isawaitable(callback_result):
             await callback_result
 
+    context = result.context
+    if guard is not None and guard.get("sources") is not None:
+        context = _register_supplementary_sources(result.evidences, guard["sources"])
     return _format_supplementary_retrieval(
         query,
-        "已获取证据",
-        result.context,
+        "已获取证据" if context else "证据预算已达上限（非事实证据）",
+        context or "无",
         source_summary=summary,
         used_web=bool(getattr(result, "used_web", False)),
     )

@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class QueryRequest(BaseModel):
@@ -12,6 +12,7 @@ class SessionResponse(BaseModel):
     """会话响应模型"""
     session_id: str
     history: list[tuple[str, str]]
+    sources: list[list[dict]] = Field(default_factory=list)
     pending_run_id: str | None = None
 
 
@@ -50,6 +51,12 @@ class KnowledgeDocument(BaseModel):
     chunk_count: int
     preview: str
     created_at: str | None = None
+    status: str = "pending"
+    attempts: int = 0
+    error_message: str | None = None
+    graph_status: str = "unknown"
+    graph_attempts: int = 0
+    graph_error_message: str | None = None
 
 
 class KnowledgeListResponse(BaseModel):

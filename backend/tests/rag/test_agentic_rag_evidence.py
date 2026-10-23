@@ -1,4 +1,4 @@
-from app.rag.agentic_rag.evidence import format_evidence_context, merge_evidence
+from app.rag.agentic_rag.evidence import format_evidence_context, merge_evidence, prepare_evidence_context
 from app.rag.agentic_rag.schemas import Evidence
 
 
@@ -56,3 +56,22 @@ def test_format_evidence_context_includes_web_url_when_present():
     assert "[1] 来源：外部搜索《Search Result》" in context
     assert "URL：https://example.com/a" in context
     assert "搜索摘要" in context
+
+
+def test_oversized_first_chunk_is_clipped_and_omitted_sources_are_not_returned():
+    original = Evidence(id="large", source="knowledge_base", title="大文档", content="正文内容" * 3000,
+                        metadata={"source_id": "doc1", "page": 7})
+    later = Evidence(id="later", source="note", title="后续资料", content="没有进入模型的内容")
+    prepared = prepare_evidence_context([original, later], max_chars=500)
+    assert len(prepared.text) == 500 and len(prepared.evidences) == 1
+    assert prepared.evidences[0].metadata == {"source_id": "doc1", "page": 7, "context_truncated": True}
+    assert prepared.text.endswith(prepared.evidences[0].content)
+    assert "后续资料" not in prepared.text and "context_truncated" not in original.metadata
+    assert len(original.content) == 12000
+
+
+def test_empty_chunks_do_not_receive_citation_numbers():
+    empty = Evidence(id="empty", source="note", title="空", content=" ")
+    fact = Evidence(id="fact", source="note", title="真实资料", content="有效事实")
+    prepared = prepare_evidence_context([empty, fact])
+    assert prepared.evidences == [fact] and prepared.text.startswith("[1] 来源")

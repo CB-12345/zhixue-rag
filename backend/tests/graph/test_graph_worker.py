@@ -23,15 +23,26 @@ def patched(session_factory, monkeypatch):
     return session_factory
 
 
+async def _claim_indexed_graph(session_factory):
+    async with session_factory() as db:
+        await db.execute(sa_update(GraphBuildTask).values(
+            index_status="completed", indexed_hash=GraphBuildTask.content_hash))
+        await db.commit()
+    return await _claim_next_task()
+
+
 _neo4j_required = pytest.mark.skipif(
     not os.getenv("NEO4J_TEST_URI"), reason="需要真实 Neo4j（设 NEO4J_TEST_URI 启用）")
 
 
 @pytest.fixture
 def neo4j_env(monkeypatch):
+    from app.core.background_init import init_manager
     from app.core.failed_response import settings
+    from tests.graph.test_neo4j_pipeline import FakeEmbed
 
     monkeypatch.setattr(settings, "NEO4J_URI", os.environ["NEO4J_TEST_URI"], raising=False)
+    monkeypatch.setattr(init_manager, "embed_model", FakeEmbed())
 
 
 @pytest.mark.asyncio
@@ -72,14 +83,14 @@ async def test_enqueue_resets_attempts_on_content_change(db_session, patched):
 
 @pytest.mark.asyncio
 async def test_claim_marks_running_and_returns_none_when_empty(db_session, patched):
-    assert await _claim_next_task() is None
+    assert await _claim_indexed_graph(patched) is None
     await graph_service._enqueue_build_task("u1", "note", "n1", "t", "h", {"text": "x"})
-    task_id = await _claim_next_task()
+    task_id = await _claim_indexed_graph(patched)
     assert task_id is not None
     row = (await db_session.execute(select(GraphBuildTask))).scalar_one()
     assert row.status == "running"
     # 已无 pending → 认领不到
-    assert await _claim_next_task() is None
+    assert await _claim_indexed_graph(patched) is None
 
 
 @pytest.mark.asyncio
@@ -100,13 +111,13 @@ async def test_process_task_retry_then_failed(db_session, patched, monkeypatch):
     await db_session.commit()
 
     # 第一次消费：失败 → 重回 pending
-    task_id, run_token = await _claim_next_task()
+    task_id, run_token = await _claim_indexed_graph(patched)
     assert await graph_service.process_task(task_id, run_token=run_token) is False
     row = (await db_session.execute(select(GraphBuildTask))).scalar_one()
     assert row.status == "pending" and row.attempts == 1
 
     # 第二次消费：达到上限 → failed 终态
-    task_id, run_token = await _claim_next_task()
+    task_id, run_token = await _claim_indexed_graph(patched)
     assert await graph_service.process_task(task_id, run_token=run_token) is True
     await db_session.rollback()  # 结束本会话快照，读取其他会话的提交
     row = (await db_session.execute(select(GraphBuildTask))).scalar_one()
@@ -127,7 +138,7 @@ async def test_process_task_force_bypasses_hash_check(db_session, patched, monke
     await db_session.commit()
 
     await graph_service._enqueue_build_task("u1", "note", "n1", "标题", "h", {}, force=True)
-    task_id, run_token = await _claim_next_task()
+    task_id, run_token = await _claim_indexed_graph(patched)
     assert await graph_service.process_task(task_id, run_token=run_token) is True
 
     row = (await db_session.execute(select(GraphBuildTask))).scalar_one()
@@ -151,7 +162,9 @@ async def test_tick_drains_queue_in_order(db_session, patched, monkeypatch,
     await graph_service._enqueue_build_task("u1", "note", "n1", "t1", content_hash("a"), {"text": "a"})
     await graph_service._enqueue_build_task("u1", "note", "n2", "t2", content_hash("b"), {"text": "b"})
 
+    assert await _tick("index") is True
     assert await _tick() is True
+    assert await _tick("index") is True
     assert await _tick() is True
     assert await _tick() is False  # 队列空
 
@@ -165,14 +178,14 @@ async def test_tick_drains_queue_in_order(db_session, patched, monkeypatch,
 @pytest.mark.asyncio
 async def test_claim_writes_and_rotates_run_token(db_session, patched):
     await graph_service._enqueue_build_task("u1", "note", "n1", "t", "h", {"text": "x"})
-    task_id, run_token = await _claim_next_task()
+    task_id, run_token = await _claim_indexed_graph(patched)
     assert run_token
     row = (await db_session.execute(select(GraphBuildTask))).scalar_one()
     assert row.status == "running" and row.run_token == run_token
 
     # 执行期间重新入队后再认领：同一任务行，令牌替换
     await graph_service._enqueue_build_task("u1", "note", "n1", "t", "h2", {"text": "y"})
-    task_id2, run_token2 = await _claim_next_task()
+    task_id2, run_token2 = await _claim_indexed_graph(patched)
     assert task_id2 == task_id and run_token2 != run_token
 
 
@@ -180,7 +193,7 @@ async def test_claim_writes_and_rotates_run_token(db_session, patched):
 async def test_recover_stale_tasks_requeues_running(db_session, patched):
     """P1 回归：进程崩溃遗留的 running 任务在 worker 启动时恢复为 pending。"""
     await graph_service._enqueue_build_task("u1", "note", "n1", "t", "h", {"text": "x"})
-    task_id, run_token = await _claim_next_task()
+    task_id, run_token = await _claim_indexed_graph(patched)
     row = (await db_session.execute(select(GraphBuildTask))).scalar_one()
     assert row.status == "running"
 
@@ -217,7 +230,7 @@ async def test_process_task_superseded_discards_result(db_session, patched, monk
 
     await graph_service._enqueue_build_task(
         "u1", "note", "n1", "t", content_hash("v1"), {"text": "v1"})
-    task_id, run_token = await _claim_next_task()
+    task_id, run_token = await _claim_indexed_graph(patched)
     seen["task_id"] = task_id
 
     assert await graph_service.process_task(task_id, run_token=run_token) is True
@@ -252,6 +265,8 @@ async def test_manual_re_extract_filters_source_type(db_session, patched):
                                    source_type="doc", content_hash="h", status="success"))
     await db_session.commit()
 
+    db_session.add(Note(id="n1", user_id="u1", title="t", content="current"))
+    await db_session.commit()
     await graph_service.manual_re_extract("n1", "u1")
 
     await db_session.rollback()
@@ -259,5 +274,5 @@ async def test_manual_re_extract_filters_source_type(db_session, patched):
         select(GraphExtractLog).where(GraphExtractLog.id == "l1"))).scalar_one()
     doc_log = (await db_session.execute(
         select(GraphExtractLog).where(GraphExtractLog.id == "l2"))).scalar_one()
-    assert note_log.status == "pending"
+    assert note_log.status == "success"  # 入队不提前改写独立抽取日志
     assert doc_log.status == "success"

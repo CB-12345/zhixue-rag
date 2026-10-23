@@ -3,9 +3,9 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# uv 引导安装镜像源（仅用于 pip 装 uv；依赖安装源由 backend/pyproject.toml 的 [tool.uv] 统一配置为清华镜像，
-# 与本地开发一致，如需换源直接修改 pyproject.toml 即可）
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# uv 引导安装源；本机使用官方 PyPI，避免镜像站下载返回 403。
+# 项目依赖源由 pyproject.toml 与 uv.lock 统一配置。
+ARG PIP_INDEX_URL=https://pypi.org/simple
 ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_NO_CACHE_DIR=1
 
@@ -19,7 +19,7 @@ RUN apt-get update \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 uv（走上述 PyPI 镜像；不用 ghcr 官方镜像，国内网络常不可达）
+# 安装 uv（走上述 PyPI 源）。
 RUN pip install --no-cache-dir uv
 
 ENV UV_NO_CACHE=1 \

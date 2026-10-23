@@ -1,8 +1,4 @@
-"""图谱业务编排：抽取触发、抽取管线、生命周期清理。
-
-抽取管线在 create_task 火后不管的任务内执行，自开 AsyncSessionLocal 会话；
-失败不阻塞笔记主流程，写回 extract_logs(failed) 并推送失败事件。
-"""
+"""来源构建编排：持久化任务、独立基础索引与图谱抽取、生命周期清理。"""
 import asyncio
 import hashlib
 import json
@@ -18,7 +14,7 @@ from app.db.db_config import AsyncSessionLocal
 from app.graph.extraction.chunk_matcher import build_text_chunks, match_entities_in_chunks
 from app.graph.extraction.entity_extractor import extract_entities
 from app.graph.extraction.link_parser import parse_links
-from app.graph.schemas.graph import EntityIn
+from app.graph.schemas.graph import EntityIn, ExtractResult
 from app.graph.services.event_bus import event_bus
 from app.graph.storage import get_graph_store
 from app.graph.storage.neo4j_client import GraphUnavailableError
@@ -65,7 +61,7 @@ async def _ensure_extract_log(db: AsyncSession, user_id: str, source_id: str, co
         select(GraphExtractLog).where(GraphExtractLog.user_id == user_id,
                                       GraphExtractLog.note_id == source_id,
                                       GraphExtractLog.source_type == source_type))).scalar_one_or_none()
-    if row is not None and row.status != "failed":
+    if row is not None and row.status == "success":
         if row.content_hash == content_hash_value:
             return False
     if row is None:
@@ -104,8 +100,8 @@ async def _run_extraction(source_id: str, user_id: str, title: str, body_hash: s
     """抽取管线：LLM 抽取 → upsert 实体/关系 → 先清后插来源关联 → 落日志 → 推送。
 
     source_type="note" 时额外做双链解析与笔记双链边；"doc" 时不做双链（文档不入笔记图）。
-    写入 Chunk 节点与 Chunk 级 MENTIONS 边；chunks 为上传管线预切好的切片载荷
-    （含 page/image_paths），未提供时对 body 现切（笔记路径）。
+    只写实体、关系和 Chunk 级 MENTIONS；基础切片由独立索引阶段负责。
+    chunks 为上传管线预切好的切片载荷，未提供时对 body 现切以匹配实体。
 
     返回 True 表示任务完成（含"来源已删除/无正文"这类无事可做的正常终态），
     False 表示可重试的失败。
@@ -130,12 +126,22 @@ async def _run_extraction(source_id: str, user_id: str, title: str, body_hash: s
 
             # 2. LLM 抽取
             from app.core.background_init import init_manager
-            chat_model = init_manager.chat_model
-            if chat_model is None:
-                raise RuntimeError("chat_model 未初始化")
-            result = await extract_entities(title, body, chat_model)
+            if (body or "").strip() or chunks:
+                chat_model = init_manager.chat_model
+                if chat_model is None:
+                    raise RuntimeError("chat_model 未初始化")
+                result = await extract_entities(title, body, chat_model)
+            else:
+                # 清空正文只需清理索引和关联，不依赖模型服务是否可用。
+                result = ExtractResult(entities=[], relations=[])
 
-            # 2.5 来源存在性复检：LLM 抽取期间来源可能已被删除（清理先于抽取完成），
+            # 图谱只关联现有切片，不写向量、不替换基础索引。
+            chunk_payloads = list(chunks) if chunks is not None else [
+                {"chunk_index": i, "text": text}
+                for i, text in enumerate(await asyncio.to_thread(build_text_chunks, body or ""))]
+            texts = [c["text"] for c in chunk_payloads]
+
+            # 2.5 来源存在性复检：LLM 调用期间来源可能已被删除，
             #     此时放弃写入，避免"复活"已清理的数据
             if source_type == "doc":
                 alive = (await db.execute(select(GraphDoc.id).where(
@@ -151,7 +157,8 @@ async def _run_extraction(source_id: str, user_id: str, title: str, body_hash: s
                 await db.commit()
                 return True
 
-            # 2.6 认领复检：抽取期间任务被重新入队（状态/令牌/哈希已变）则放弃写入，
+            # 2.6 认领复检：模型调用后再检查，编辑可能使旧任务失效。
+            # 任务被重新入队（状态/令牌/哈希已变）则放弃写入，
             #     防旧正文的抽取结果覆盖新任务（写图谱前的最后一道闸）
             if claim_check is not None and not await claim_check():
                 logger.info(f"任务在抽取期间被重新入队，放弃写入 source_id={source_id}")
@@ -190,22 +197,10 @@ async def _run_extraction(source_id: str, user_id: str, title: str, body_hash: s
             await store.ensure_source_node(user_id, source_type, source_id, title)
             await store.set_source_mentions(user_id, source_type, source_id, mention_links)
 
-            # 5.5 Chunk 写入与 Chunk 级 MENTIONS（规则匹配零 LLM 成本）
-            chunk_payloads = list(chunks) if chunks else [
-                {"chunk_index": i, "text": text}
-                for i, text in enumerate(await asyncio.to_thread(build_text_chunks, body or ""))]
-            if chunk_payloads:
-                texts = [c["text"] for c in chunk_payloads]
-                embed_model = init_manager.embed_model
-                if embed_model is not None:
-                    vectors = await asyncio.to_thread(embed_model.embed_documents, texts)
-                    for chunk, vector in zip(chunk_payloads, vectors):
-                        chunk["embedding"] = vector
-                await store.upsert_chunks(user_id, source_type, source_id, title, chunk_payloads)
-                matched = match_entities_in_chunks(result.entities, texts)
-                await store.set_chunk_mentions(user_id, source_type, source_id, [
-                    {"entity_id": name_to_id[name], "chunk_indexes": idxs}
-                    for name, idxs in matched.items() if name in name_to_id])
+            matched = match_entities_in_chunks(result.entities, texts)
+            await store.set_chunk_mentions(user_id, source_type, source_id, [
+                {"entity_id": name_to_id[name], "chunk_indexes": idxs}
+                for name, idxs in matched.items() if name in name_to_id])
             # 引用收缩：本轮抽取未再关联的旧实体摘除本来源，无任何引用残留即级联删除
             removed = [eid for eid in old_entity_ids if eid not in name_to_id.values()]
             if removed:
@@ -243,6 +238,8 @@ async def _run_extraction(source_id: str, user_id: str, title: str, body_hash: s
             return True
     except Exception as e:
         logger.error(f"实体抽取失败 source_id={source_id} type={source_type}: {e}", exc_info=True)
+        if claim_check is not None and not await claim_check():
+            return True
         try:
             async with AsyncSessionLocal() as db:
                 log = (await db.execute(select(GraphExtractLog).where(
@@ -261,30 +258,134 @@ async def _run_extraction(source_id: str, user_id: str, title: str, body_hash: s
         return False
 
 
+async def _run_indexing(source_id: str, user_id: str, title: str, body_hash: str,
+                        body: str | None = None, source_type: str = "note",
+                        chunks: list[dict] | None = None, claim_check=None) -> bool:
+    """仅构建可检索切片；完整向量计算成功、来源和版本仍有效后才替换旧集合。
+
+    返回 False 表示来源已删除或版本已失效；异常由索引任务单独记录、重试。
+    """
+    from app.core.background_init import init_manager
+
+    async with AsyncSessionLocal() as db:
+        model = GraphDoc if source_type == "doc" else Note
+        source = (await db.execute(select(model).where(
+            model.id == source_id, model.user_id == user_id))).scalar_one_or_none()
+        if source is None:
+            return False
+        if body is None:
+            body = source.content if source_type == "note" else ""
+            title = title or (source.title if source_type == "note" else source.filename)
+
+    payloads = [dict(c) for c in chunks] if chunks is not None else [
+        {"chunk_index": i, "text": text}
+        for i, text in enumerate(await asyncio.to_thread(build_text_chunks, body or ""))]
+    texts = [c["text"] for c in payloads]
+    if texts:
+        if init_manager.embed_model is None:
+            raise RuntimeError("Embedding 模型未初始化")
+        vectors = await asyncio.to_thread(init_manager.embed_model.embed_documents, texts)
+        if len(vectors) != len(payloads):
+            raise ValueError("Embedding 返回数量与切片数量不一致")
+        for chunk, vector in zip(payloads, vectors):
+            chunk["embedding"] = vector
+
+    async with AsyncSessionLocal() as db:
+        alive = (await db.execute(select(model.id).where(
+            model.id == source_id, model.user_id == user_id))).first()
+        if alive is None or (claim_check is not None and not await claim_check()):
+            return False
+        store = get_graph_store(db)
+        await store.ensure_source_node(user_id, source_type, source_id, title)
+        await store.replace_chunks(user_id, source_type, source_id, title, payloads)
+    return True
+
+
+async def process_index_task(task_id: str, run_token: str) -> bool:
+    """执行索引阶段；图谱的状态、重试与模型调用均不参与本阶段。"""
+    async with AsyncSessionLocal() as db:
+        task = await db.get(GraphBuildTask, task_id)
+        if task is None or task.index_status != "running" or task.index_run_token != run_token:
+            return True
+        user_id, source_type, source_id = task.user_id, task.source_type, task.source_id
+        title, body_hash, payload_raw = task.title or "", task.content_hash, task.payload
+        task.index_attempts += 1
+        await db.commit()
+
+    async def claim_valid():
+        async with AsyncSessionLocal() as db:
+            task = await db.get(GraphBuildTask, task_id)
+            return (task is not None and task.index_status == "running"
+                    and task.index_run_token == run_token and task.content_hash == body_hash)
+
+    error = None
+    try:
+        payload = json.loads(payload_raw) if payload_raw else {}
+        ok = await _run_indexing(source_id, user_id, title, body_hash,
+                                 body=payload.get("text"), source_type=source_type,
+                                 chunks=payload.get("chunks"), claim_check=claim_valid)
+    except Exception as exc:
+        logger.error(f"基础索引失败 source_id={source_id}: {exc}", exc_info=True)
+        error, ok = str(exc)[:500], False
+
+    async with AsyncSessionLocal() as db:
+        task = await db.get(GraphBuildTask, task_id)
+        if (task is None or task.index_status != "running"
+                or task.index_run_token != run_token or task.content_hash != body_hash):
+            return True
+        if ok:
+            task.index_status = "completed"
+            task.indexed_hash = body_hash
+            task.index_error_message = None
+        elif error is None:
+            # 来源已删除：不释放图谱阶段；删除流程会移除任务。
+            task.index_status = "failed"
+            task.index_error_message = "来源已删除或版本已失效"
+        else:
+            task.index_status = "pending" if task.index_attempts < MAX_TASK_ATTEMPTS else "failed"
+            task.index_error_message = error
+        await db.commit()
+        return task.index_status in ("completed", "failed")
+
+
+async def _upsert_build_task(db: AsyncSession, user_id: str, source_type: str,
+                             source_id: str, title: str, body_hash: str, payload: dict,
+                             force: bool = False) -> None:
+    """在调用方事务内登记任务，文档注册行和任务必须同时提交。"""
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    row = (await db.execute(select(GraphBuildTask).where(
+        GraphBuildTask.user_id == user_id,
+        GraphBuildTask.source_type == source_type,
+        GraphBuildTask.source_id == source_id))).scalar_one_or_none()
+    if row is None:
+        db.add(GraphBuildTask(
+            id=str(uuid.uuid4()), user_id=user_id, source_type=source_type,
+            source_id=source_id, title=title, content_hash=body_hash,
+            payload=payload_json, status="pending", force=force, index_status="pending"))
+    else:
+        content_changed = row.content_hash != body_hash
+        row.title = title
+        row.content_hash = body_hash
+        row.payload = payload_json
+        row.status = "pending"
+        row.error_message = None
+        row.force = force  # 按本次触发重置：手动强抽不永久粘滞到后续普通保存
+        row.run_token = None
+        row.index_run_token = None
+        if content_changed or row.index_status != "completed" or row.indexed_hash != body_hash:
+            row.index_status = "pending"
+            row.index_error_message = None
+            if content_changed:
+                row.index_attempts = 0
+        if content_changed:
+            row.attempts = 0
+
+
 async def _enqueue_build_task(user_id: str, source_type: str, source_id: str, title: str,
                               body_hash: str, payload: dict, force: bool = False) -> bool:
-    """任务表幂等 upsert（同来源重复触发覆盖载荷并置 pending；内容变化重置重试计数）。"""
-    payload_json = json.dumps(payload, ensure_ascii=False)
+    """任务表幂等 upsert；内容变化时重置重试计数。"""
     async with AsyncSessionLocal() as db:
-        row = (await db.execute(select(GraphBuildTask).where(
-            GraphBuildTask.user_id == user_id,
-            GraphBuildTask.source_type == source_type,
-            GraphBuildTask.source_id == source_id))).scalar_one_or_none()
-        if row is None:
-            db.add(GraphBuildTask(
-                id=str(uuid.uuid4()), user_id=user_id, source_type=source_type,
-                source_id=source_id, title=title, content_hash=body_hash,
-                payload=payload_json, status="pending", force=force))
-        else:
-            content_changed = row.content_hash != body_hash
-            row.title = title
-            row.content_hash = body_hash
-            row.payload = payload_json
-            row.status = "pending"
-            row.error_message = None
-            row.force = force  # 按本次触发重置：手动强抽不永久粘滞到后续普通保存
-            if content_changed:
-                row.attempts = 0
+        await _upsert_build_task(db, user_id, source_type, source_id, title, body_hash, payload, force)
         await db.commit()
     return True
 
@@ -297,41 +398,94 @@ async def maybe_schedule_extraction(note_id: str, user_id: str, title: str, cont
 
 async def maybe_schedule_doc_extraction(user_id: str, md5: str, filename: str, content: str,
                                         chunks: list[dict] | None = None) -> bool:
-    """知识库文档抽取触发（上传成功后由知识库管线调用）：
-
-    1. upsert graph_docs 文档注册行（id=md5，幂等）；
-    2. 入队构建任务（payload 优先携带上传管线预切的 chunks，保留 page/图片元数据；
-       未携带时 worker 对全文兜底现切）。
-    返回是否入队。失败不阻塞上传主流程。
-    """
-    body_hash = content_hash(content)
+    """文档注册与基础索引任务在同一事务提交；导入/维护脚本使用此入口。"""
     async with AsyncSessionLocal() as db:
         doc = (await db.execute(select(GraphDoc).where(
             GraphDoc.id == md5, GraphDoc.user_id == user_id))).scalar_one_or_none()
         if doc is None:
             db.add(GraphDoc(id=md5, user_id=user_id, filename=filename))
-        elif doc.filename != filename:
+        else:
             doc.filename = filename
+        payload = {"text": content or ""}
+        if chunks is not None:
+            payload["chunks"] = chunks
+        await _upsert_build_task(db, user_id, "doc", md5, filename, content_hash(content), payload)
         await db.commit()
-    payload = {"chunks": chunks} if chunks else {"text": content or ""}
-    return await _enqueue_build_task(user_id, "doc", md5, filename, body_hash, payload)
+    return True
+
+
+async def register_document_upload(user_id: str, md5: str, filename: str, content: str,
+                                   chunks: list[dict]) -> bool:
+    """上传身份规则：同名同内容幂等，同名异内容/同内容异名返回冲突。
+
+    MySQL 锁定用户行，串行化同一用户的并发上传（包括首次注册）；
+    MD5 文件只作为兼容记录，不能作为跳过任务登记的依据。
+    返回 False 表示已登记，保留原任务进度和失败状态，失败阶段通过重试接口处理。
+    """
+    from fastapi import HTTPException
+
+    from app.models.user_model import User
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(select(User.uuid).where(User.uuid == user_id).with_for_update())
+        docs = (await db.execute(select(GraphDoc).where(
+            GraphDoc.user_id == user_id,
+            (GraphDoc.filename == filename) | (GraphDoc.id == md5)))).scalars().all()
+        for doc in docs:
+            # 文件名比较以数据库 collation 为准（MySQL 默认不区分大小写）。
+            if doc.id != md5:
+                raise HTTPException(409, "已存在同名但内容不同的文档，请先删除旧文档后重新上传")
+            if doc.id == md5 and doc.filename != filename:
+                raise HTTPException(409, f"相同内容已保存为「{doc.filename}」，请使用已有文档")
+        existing = next((doc for doc in docs if doc.id == md5), None)
+        task = (await db.execute(select(GraphBuildTask).where(
+            GraphBuildTask.user_id == user_id, GraphBuildTask.source_type == "doc",
+            GraphBuildTask.source_id == md5))).scalar_one_or_none()
+        if existing is not None and task is not None:
+            return False
+        if existing is None:
+            db.add(GraphDoc(id=md5, user_id=user_id, filename=filename))
+        await _upsert_build_task(db, user_id, "doc", md5, filename, content_hash(content),
+                                 {"text": content or "", "chunks": chunks})
+        await db.commit()
+    return True
+
+
+async def retry_document(user_id: str, doc_id: str) -> bool:
+    """只重试失败的阶段；图谱重试复用现有向量和原始切片载荷。"""
+    from fastapi import HTTPException
+    async with AsyncSessionLocal() as db:
+        task = (await db.execute(select(GraphBuildTask).where(
+            GraphBuildTask.user_id == user_id,
+            GraphBuildTask.source_type == "doc",
+            GraphBuildTask.source_id == doc_id,
+        ).with_for_update())).scalar_one_or_none()
+        if task is None or (task.index_status != "failed" and task.status != "failed"):
+            raise HTTPException(status_code=409, detail="文档不存在或当前无需重试，请刷新列表")
+        if task.index_status == "failed":
+            task.index_status = "pending"
+            task.index_attempts = 0
+            task.index_error_message = None
+            task.index_run_token = None
+        task.status = "pending"
+        task.attempts = 0
+        task.force = True
+        task.error_message = None
+        task.run_token = None
+        await db.commit()
+    return True
 
 
 async def manual_re_extract(note_id: str, user_id: str) -> bool:
     """手动重抽：强制入队（worker 跳过内容哈希判重）。"""
     async with AsyncSessionLocal() as db:
-        row = (await db.execute(select(GraphExtractLog).where(
-            GraphExtractLog.user_id == user_id, GraphExtractLog.note_id == note_id,
-            GraphExtractLog.source_type == "note"))).scalar_one_or_none()
-        h = row.content_hash if row else content_hash("")
-        if row is None:
-            db.add(GraphExtractLog(id=str(uuid.uuid4()), user_id=user_id, note_id=note_id,
-                                   content_hash=h, status="pending"))
-        else:
-            row.status = "pending"
-            row.error_message = None
-        await db.commit()
-    return await _enqueue_build_task(user_id, "note", note_id, "", h, {}, force=True)
+        note = (await db.execute(select(Note).where(
+            Note.id == note_id, Note.user_id == user_id))).scalar_one_or_none()
+        if note is None:
+            return False
+        title, body = note.title, note.content or ""
+    return await _enqueue_build_task(user_id, "note", note_id, title,
+                                     content_hash(body), {"text": body}, force=True)
 
 
 async def process_task(task_id: str, run_token: str | None = None) -> bool:
@@ -359,8 +513,9 @@ async def process_task(task_id: str, run_token: str | None = None) -> bool:
 
         async def _claim_still_valid() -> bool:
             """抽取中途校验：任务未被重新入队（状态/令牌/内容哈希均未变）才允许写图谱。"""
-            row = (await db.execute(
-                select(GraphBuildTask).where(GraphBuildTask.id == task_id))).scalar_one_or_none()
+            async with AsyncSessionLocal() as claim_db:
+                row = (await claim_db.execute(
+                    select(GraphBuildTask).where(GraphBuildTask.id == task_id))).scalar_one_or_none()
             return (row is not None and row.status == "running"
                     and (run_token is None or row.run_token == run_token)
                     and row.content_hash == body_hash)
@@ -390,7 +545,7 @@ async def process_task(task_id: str, run_token: str | None = None) -> bool:
     except ValueError:
         payload = {}
     if source_type == "doc":
-        body = payload.get("text", "")
+        body = payload.get("text") or "\n\n".join(c["text"] for c in payload.get("chunks", []))
         chunks = payload.get("chunks")
     else:
         # 笔记：优先用入队时的正文（与 content_hash 一致）；force 重抽载荷为空 → 管线读 Note 表最新内容
@@ -439,6 +594,9 @@ async def cleanup_note_graph(db: AsyncSession, user_id: str, note_id: str) -> No
     Neo4j 不可用时跳过图谱清理（功能降级），MySQL 侧抽取日志仍删除。
     """
     store = get_graph_store(db)
+    await db.execute(delete(GraphBuildTask).where(
+        GraphBuildTask.user_id == user_id, GraphBuildTask.source_type == "note",
+        GraphBuildTask.source_id == note_id))
     try:
         candidates = await store.clear_source_data(user_id, "note", note_id)
         await store.sweep_orphan_entities(user_id, candidates, [note_id])
@@ -448,7 +606,7 @@ async def cleanup_note_graph(db: AsyncSession, user_id: str, note_id: str) -> No
         GraphExtractLog.user_id == user_id, GraphExtractLog.note_id == note_id))
 
 
-async def cleanup_doc_graph(user_id: str, doc_id: str) -> None:
+async def cleanup_doc_graph(user_id: str, doc_id: str, *, strict: bool = False) -> None:
     """知识库文档删除联动：清理该文档的图节点（Neo4j）与注册行/抽取日志（MySQL）、
     实体关联、Chunk、溯源关系，并清扫因该文档而成为孤儿的实体（独立会话，异常不外抛）。
 
@@ -457,11 +615,17 @@ async def cleanup_doc_graph(user_id: str, doc_id: str) -> None:
     """
     try:
         async with AsyncSessionLocal() as db:
+            await db.execute(delete(GraphBuildTask).where(
+                GraphBuildTask.user_id == user_id, GraphBuildTask.source_type == "doc",
+                GraphBuildTask.source_id == doc_id))
+            await db.commit()
             store = get_graph_store(db)
             try:
                 candidates = await store.clear_source_data(user_id, "doc", doc_id)
                 await store.sweep_orphan_entities(user_id, candidates, [doc_id])
             except _graph_degradation_errors() as e:
+                if strict:
+                    raise RuntimeError("检索存储暂时不可用，文档尚未删除，请稍后重试") from e
                 logger.warning(f"Neo4j 不可用，跳过文档图谱清理 doc_id={doc_id}: {e}")
             # MySQL 侧维护注册行与抽取日志
             await db.execute(delete(GraphDoc).where(
@@ -471,36 +635,49 @@ async def cleanup_doc_graph(user_id: str, doc_id: str) -> None:
                 GraphExtractLog.source_type == "doc"))
             await db.commit()
     except Exception as e:
+        if strict:
+            raise
         logger.error(f"清理文档图谱失败 user_id={user_id} doc_id={doc_id}: {e}")
 
 
-async def cleanup_doc_graph_by_filename(user_id: str, filename: str) -> None:
+async def cleanup_doc_graph_by_filename(user_id: str, filename: str, *, strict: bool = False) -> list[str]:
     """按文件名清理文档图谱（md5 记录缺失时删除路径的兜底，防残留）。"""
     try:
         async with AsyncSessionLocal() as db:
-            doc = (await db.execute(select(GraphDoc).where(
-                GraphDoc.user_id == user_id, GraphDoc.filename == filename))).scalar_one_or_none()
-        if doc is not None:
-            await cleanup_doc_graph(user_id, doc.id)
+            doc_ids = list((await db.execute(select(GraphDoc.id).where(
+                GraphDoc.user_id == user_id, GraphDoc.filename == filename))).scalars())
+        for doc_id in doc_ids:
+            await cleanup_doc_graph(user_id, doc_id, strict=strict)
+        return doc_ids
     except Exception as e:
+        if strict:
+            raise
         logger.error(f"按文件名清理文档图谱失败 user_id={user_id} filename={filename}: {e}")
+        return []
 
 
-async def cleanup_all_docs_graph(user_id: str) -> None:
+async def cleanup_all_docs_graph(user_id: str, *, strict: bool = False) -> None:
     """清空用户全部文档的图谱数据（清空知识库时调用，独立会话，异常不外抛）。
 
     Neo4j 不可用时跳过图谱清理（功能降级），MySQL 侧注册行/抽取日志仍删除。
     """
     try:
         async with AsyncSessionLocal() as db:
+            await db.execute(delete(GraphBuildTask).where(
+                GraphBuildTask.user_id == user_id, GraphBuildTask.source_type == "doc"))
+            await db.commit()
             store = get_graph_store(db)
             try:
                 await store.clear_all_docs(user_id)
             except _graph_degradation_errors() as e:
+                if strict:
+                    raise RuntimeError("检索存储暂时不可用，请稍后重试清空知识库") from e
                 logger.warning(f"Neo4j 不可用，跳过用户文档图谱清理 user_id={user_id}: {e}")
             await db.execute(delete(GraphDoc).where(GraphDoc.user_id == user_id))
             await db.execute(delete(GraphExtractLog).where(
                 GraphExtractLog.user_id == user_id, GraphExtractLog.source_type == "doc"))
             await db.commit()
     except Exception as e:
+        if strict:
+            raise
         logger.error(f"清空用户文档图谱失败 user_id={user_id}: {e}")

@@ -7,7 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN npm run lint && npm run build
 
 # ---- 运行阶段：nginx 托管静态文件并反向代理后端 ----
 FROM nginx:alpine

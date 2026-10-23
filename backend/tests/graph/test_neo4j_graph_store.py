@@ -63,6 +63,86 @@ def _vec(basis: int) -> list[float]:
 
 
 @pytest.mark.asyncio
+async def test_retrieval_preserves_physical_page_for_vector_fulltext_and_mentions(store, uid, _cleanup):
+    from app.graph.schemas.graph import EntityIn
+    from app.graph.storage import neo4j_client
+
+    await store.upsert_chunks(uid, "doc", "page-fixture", "guide.pdf", [
+        {"chunk_index": 3, "text": "Pageproofalpha introduction", "page": 1, "embedding": _vec(0)},
+        {"chunk_index": 7, "text": "Pageproofalpha owner Lin Qiao", "page": 2, "embedding": _vec(1)},
+    ])
+    entity = await store.upsert_entity(uid, EntityIn(name="Pageproofalpha"))
+    await store.set_chunk_mentions(uid, "doc", "page-fixture",
+                                   [{"entity_id": entity.id, "chunk_indexes": [7]}])
+    await neo4j_client.get_neo4j_driver().execute_query("CALL db.index.fulltext.awaitEventuallyConsistentIndexRefresh()")
+    for embedding, query in ((_vec(1), ""), (None, "Pageproofalpha")):
+        hits = await store.search_chunks(uid, embedding, query, ["doc"], 10)
+        assert {hit.chunk_index: hit.page for hit in hits} == {3: 1, 7: 2}
+    hits = await store.get_chunks_mentioning(uid, [entity.id], 10)
+    assert [(hit.chunk_index, hit.page) for hit in hits] == [(7, 2)]
+
+
+@pytest.mark.asyncio
+async def test_replace_chunks_removes_stale_chunks_and_preserves_other_sources(store, uid, _cleanup):
+    from app.graph.schemas.graph import EntityIn
+    from app.graph.storage import neo4j_client
+
+    other_uid = "t-" + uuid.uuid4().hex[:8]
+    driver = neo4j_client.get_neo4j_driver()
+    original = [{"chunk_index": 0, "text": "保留的事实"},
+                {"chunk_index": 1, "text": "已经删除的事实"}]
+    try:
+        for user_id, kind, source_id in ((uid, "note", "same-id"), (uid, "doc", "same-id"),
+                                         (uid, "note", "other-id"), (other_uid, "note", "same-id")):
+            await store.upsert_chunks(user_id, kind, source_id, "来源", original)
+        entity = await store.upsert_entity(uid, EntityIn(name="待删除片段的实体"))
+        await store.set_chunk_mentions(uid, "note", "same-id",
+                                       [{"entity_id": entity.id, "chunk_indexes": [1]}])
+
+        replacement = [{"chunk_index": 0, "text": "更新后的事实", "page": 3}]
+        await store.replace_chunks(uid, "note", "same-id", "新标题", replacement)
+        await store.replace_chunks(uid, "note", "same-id", "新标题", replacement)  # 重试幂等
+        result = await driver.execute_query(
+            "MATCH (c:Chunk {user_id: $uid, kind: 'note', source_id: 'same-id'}) "
+            "RETURN c.text AS text, c.page AS page, c.source_name AS title", {"uid": uid})
+        assert [dict(row) for row in result.records] == [
+            {"text": "更新后的事实", "page": 3, "title": "新标题"}]
+        assert await store.get_chunks_mentioning(uid, [entity.id], 5) == []
+
+        await store.replace_chunks(uid, "note", "same-id", "新标题", [])
+        result = await driver.execute_query(
+            "MATCH (c:Chunk) WHERE c.user_id IN $users "
+            "RETURN c.user_id AS uid, c.kind AS kind, c.source_id AS sid, count(*) AS count",
+            {"users": [uid, other_uid]})
+        assert {(r["uid"], r["kind"], r["sid"]): r["count"] for r in result.records} == {
+            (uid, "doc", "same-id"): 2, (uid, "note", "other-id"): 2,
+            (other_uid, "note", "same-id"): 2,
+        }
+    finally:
+        await driver.execute_query("MATCH (n {user_id: $uid}) DETACH DELETE n", {"uid": other_uid})
+
+
+@pytest.mark.asyncio
+async def test_replace_chunks_rolls_back_when_new_content_cannot_be_written(store, uid, _cleanup):
+    from neo4j.exceptions import Neo4jError
+
+    from app.graph.storage import neo4j_client
+
+    original = [{"chunk_index": 0, "text": "原来的第一片"},
+                {"chunk_index": 1, "text": "原来的第二片"}]
+    await store.upsert_chunks(uid, "note", "rollback", "标题", original)
+    with pytest.raises(Neo4jError):
+        await store.replace_chunks(uid, "note", "rollback", "标题", [
+            {"chunk_index": 0, "text": "不能部分提交的新正文"},
+            {"chunk_index": 2, "text": {"invalid": "Neo4j 属性不支持 map"}},
+        ])
+    result = await neo4j_client.get_neo4j_driver().execute_query(
+        "MATCH (c:Chunk {user_id: $uid, source_id: 'rollback'}) "
+        "RETURN c.chunk_index AS chunk_index, c.text AS text ORDER BY c.chunk_index", {"uid": uid})
+    assert [dict(row) for row in result.records] == original
+
+
+@pytest.mark.asyncio
 async def test_entity_upsert_create_update_alias(store, uid, _cleanup):
     from app.graph.schemas.graph import EntityIn
 
@@ -331,3 +411,58 @@ async def test_multi_user_same_md5_isolated(store, _cleanup):
         for u in (uid_a, uid_b):
             await driver.execute_query(
                 "MATCH (n) WHERE n.user_id = $uid DETACH DELETE n", {"uid": u})
+
+
+@pytest.mark.parametrize("crowding", ["other_user", "other_kind"])
+@pytest.mark.parametrize("search_mode", ["scoped_exact", "global_ann"])
+async def test_vector_retrieval_finds_own_scope_when_global_candidates_are_crowded(store, crowding, search_mode, monkeypatch):
+    """全局最近邻被他人/其他类型占满时，当前用户的文档仍应按相似度召回。"""
+    from app.graph.storage import neo4j_client
+    from app.graph.storage.neo4j_graph_store import settings
+
+    monkeypatch.setattr(settings, "VECTOR_EXACT_SCOPE_LIMIT", 2000 if search_mode == "scoped_exact" else 2)
+    monkeypatch.setattr(settings, "VECTOR_ANN_MAX_CANDIDATES", 256)
+    owner, stranger = "scope-" + uuid.uuid4().hex, "scope-" + uuid.uuid4().hex
+    driver = neo4j_client.get_neo4j_driver()
+    try:
+        own_chunks = [{"chunk_index": i, "text": f"当前用户的实验说明 {i}",
+                       "embedding": [a, b] + [0.0] * (DIM - 2)}
+                      for i, (a, b) in enumerate([(0.8, 0.6), (0.6, 0.8), (0.4, 0.916515)])]
+        await store.upsert_chunks(owner, "doc", "shared-source", "当前用户文档", own_chunks)
+        crowd_owner, crowd_kind = (stranger, "doc") if crowding == "other_user" else (owner, "note")
+        await store.upsert_chunks(crowd_owner, crowd_kind, "shared-source", "干扰资料",
+                                 [{"chunk_index": i, "text": f"无关干扰 {i}", "embedding": _vec(0)} for i in range(64)])
+        await driver.execute_query("CALL db.awaitIndexes(30)")
+        # 旧查询的前 4 个全局候选均被过滤，能稳定复现漏召回。
+        legacy = await driver.execute_query(
+            "CALL db.index.vector.queryNodes('chunk_embedding_index', 4, $embedding) "
+            "YIELD node, score WHERE node.user_id=$uid AND node.kind='doc' RETURN node.id AS id",
+            {"embedding": _vec(0), "uid": owner})
+        assert legacy.records == []
+        hits = await store.search_chunks(owner, _vec(0), None, ["doc"], 2)
+        assert [hit.text for hit in hits] == ["当前用户的实验说明 0", "当前用户的实验说明 1"]
+        assert all(hit.kind == "doc" and hit.source_name == "当前用户文档" for hit in hits)
+        assert hits[0].metadata["vector_score"] > hits[1].metadata["vector_score"]
+        assert all(hit.metadata["vector_search_mode"] == search_mode for hit in hits)
+        if search_mode == "global_ann":
+            assert all(hit.metadata["vector_candidate_k"] == 256 for hit in hits)
+    finally:
+        await driver.execute_query("MATCH (n) WHERE n.user_id IN $users DETACH DELETE n", {"users": [owner, stranger]})
+
+
+async def test_scoped_exact_ignores_unindexable_vectors_and_keeps_fulltext_fallback(store, uid, _cleanup):
+    from app.graph.storage import neo4j_client
+
+    await store.upsert_chunks(uid, "doc", "invalid-vectors", "向量边界", [
+        {"chunk_index": 0, "text": "needle 正常向量", "embedding": _vec(0)},
+        {"chunk_index": 1, "text": "needle 零向量", "embedding": [0.0] * DIM},
+        {"chunk_index": 2, "text": "needle 旧维度", "embedding": [1.0, 0.0]},
+        {"chunk_index": 3, "text": "needle 暂无向量"},
+    ])
+    driver = neo4j_client.get_neo4j_driver()
+    await driver.execute_query("CALL db.awaitIndexes(30)")
+    hits = await store.search_chunks(uid, _vec(0), None, None, 5)
+    assert [hit.chunk_index for hit in hits] == [0]
+    fallback = await store.search_chunks(uid, [0.0] * DIM, "needle", None, 5)
+    assert {hit.chunk_index for hit in fallback} == {0, 1, 2, 3}
+    assert all("vector_score" not in hit.metadata for hit in fallback)

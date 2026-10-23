@@ -249,6 +249,43 @@ async def test_get_agent_response_exception_fallback(monkeypatch):
 # ---------------------------------------------------------------------------
 # get_agent_stream_response（Level A）
 # ---------------------------------------------------------------------------
+async def test_refusal_is_persisted_without_calling_model_or_tools(monkeypatch, patched_db, fresh_session_manager):
+    def forbidden_agent(**kwargs):
+        raise AssertionError("资料不足时不应创建生成 Agent")
+
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", forbidden_agent)
+    monkeypatch.setattr(agent_module, "get_checkpointer", lambda: MemorySaver())
+    events = _parse_frames(await _collect_stream("缺失事实", "s-refusal", "u1", rag_refusal="现有资料没有足够证据。"))
+    assert "".join(e.get("content", "") for e in events if e["type"] == "response") == "现有资料没有足够证据。"
+    assert events[-1]["type"] == "done" and not any(e["type"] == "error" for e in events)
+    manager = services_module.session_manager.session_manager
+    assert await manager.get_history("s-refusal", "u1") == [("缺失事实", "现有资料没有足够证据。")]
+    assert (await manager.get_session("s-refusal", "u1", include_sources=True))["sources"] == [[]]
+
+
+async def test_refusal_preserves_pending_approval_guard(monkeypatch, patched_db, fresh_session_manager):
+    async def active(run_id):
+        return True
+
+    monkeypatch.setattr(agent_module, "_pending_is_active", active)
+    manager = services_module.session_manager.session_manager
+    await manager.get_session("s-refusal-pending", "u1")
+    await manager.set_pending_run_id("s-refusal-pending", "u1", "pending1")
+    events = _parse_frames(await _collect_stream("缺失事实", "s-refusal-pending", "u1", rag_refusal="拒答"))
+    assert any(e.get("content") == "PENDING_EXISTS" for e in events)
+    assert await manager.get_history("s-refusal-pending", "u1") == []
+    assert await manager.get_pending_run_id("s-refusal-pending", "u1") == "pending1"
+
+
+async def test_refusal_does_not_write_other_users_session(monkeypatch, patched_db, fresh_session_manager):
+    monkeypatch.setattr(agent_module, "get_checkpointer", lambda: MemorySaver())
+    manager = services_module.session_manager.session_manager
+    await manager.get_session("s-refusal-owner", "owner")
+    events = _parse_frames(await _collect_stream("缺失事实", "s-refusal-owner", "other", rag_refusal="拒答"))
+    assert any(e["type"] == "error" for e in events)
+    assert await manager.get_history("s-refusal-owner", "owner") == []
+
+
 async def test_get_agent_stream_response_full_flow(monkeypatch, patched_db, fresh_session_manager):
     response_text = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     fake = FakeAgent(events=_agent_run_events(final=[response_text]))
@@ -543,6 +580,29 @@ async def test_get_agent_stream_response_with_rag_context(monkeypatch, patched_d
     assert "证据不足" in system_prompt
     assert "search_rag" in system_prompt
     assert "不要重复问一遍用户原话" in system_prompt
+
+
+async def test_resolved_follow_up_explanation_does_not_replace_original_saved_query(
+        monkeypatch, patched_db, fresh_session_manager):
+    from unittest.mock import AsyncMock
+
+    from app.rag.answer_verifier import VerifiedAnswer
+
+    monkeypatch.setattr(agent_module, "AnswerVerifier", lambda: types.SimpleNamespace(
+        verify=AsyncMock(return_value=VerifiedAnswer("周予安 [1]", "supported", 1))))
+    seen = {}
+    def capturing_factory(custom_system_prompt=None, **kwargs):
+        seen["prompt"] = custom_system_prompt
+        assert "rag_resolved_query" not in kwargs
+        return FakeAgent(messages=[AIMessage(content="周予安 [1]")], events=_agent_run_events(final=["周予安 [1]"]))
+    monkeypatch.setattr(agent_module.agent_factory, "create_agent", capturing_factory)
+    await _collect_stream("它的负责人呢？", session_id="resolved-follow-up", user_id="u1",
+                          rag_context="[1] HYB-2048 的负责人是周予安。",
+                          rag_resolved_query="HYB-2048 的负责人是谁？")
+    assert '"HYB-2048 的负责人是谁？"' in seen["prompt"]
+    assert "不是事实证据" in seen["prompt"]
+    history = await services_module.session_manager.session_manager.get_history("resolved-follow-up", "u1")
+    assert history == [("它的负责人呢？", "周予安 [1]")]
 
 
 async def test_get_agent_stream_response_default_system_prompt_without_rag(

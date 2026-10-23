@@ -4,6 +4,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import nullcontext
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -28,6 +29,7 @@ from app.agent.agent_tools import (
 from app.agent.checkpoint.mysql_saver import MySQLCheckpointSaver
 from app.core.logger_handler import logger
 from app.core.settings import settings
+from app.rag.answer_verifier import AnswerVerifier
 from app.services import session_manager as sm
 from app.utils.prompt_loader import load_prompt
 
@@ -471,7 +473,7 @@ def _message_text(output) -> str:
     return ""
 
 
-async def _emit_agent_events(agent, inputs, config, thinking_queue, full_response):
+async def _emit_agent_events(agent, inputs, config, thinking_queue, full_response, *, buffer_response=False, run_info=None):
     """执行 astream_events 并转发 thinking/response 事件。
 
     返回 (interrupted_payload_or_None, error_str_or_None)。
@@ -491,7 +493,8 @@ async def _emit_agent_events(agent, inputs, config, thinking_queue, full_respons
         if not content:
             return
         full_response.append(content)
-        await thinking_queue.put({"type": "response", "content": content})
+        if not buffer_response:
+            await thinking_queue.put({"type": "response", "content": content})
 
     try:
         t_first = time.perf_counter()
@@ -520,6 +523,8 @@ async def _emit_agent_events(agent, inputs, config, thinking_queue, full_respons
                     await emit_response(text)
             elif event_type == "on_tool_start":
                 tool = event.get("name", "unknown_tool")
+                if run_info is not None:
+                    run_info.setdefault("tools", set()).add(tool)
                 await emit_thinking("tool_start", f"正在调用 {tool}",
                                     {"tool": tool, "tool_input": event_data.get("input")})
             elif event_type == "on_tool_end":
@@ -537,6 +542,13 @@ async def _emit_agent_events(agent, inputs, config, thinking_queue, full_respons
         # 结束后检测中断点：以 interrupts 负载为准（挂起节点名随版本而异，
         # 如 HumanInTheLoopMiddleware.after_model，不可硬编码 '__interrupt__'）。
         snapshot = await agent.aget_state(config)
+        if buffer_response:
+            # Nested retrieval models and tool-planning text are not the final answer.
+            # Read the authoritative final AI turn, never concatenate inner model streams.
+            messages = (getattr(snapshot, "values", None) or {}).get("messages", [])
+            final = messages[-1] if messages else None
+            full_response[:] = ([_message_text(final)] if isinstance(final, AIMessage)
+                                and not getattr(final, "tool_calls", None) else [])
         return _interrupt_payload(snapshot), None
     except Exception as e:
         logger.error(f"Agent 执行错误: {e}", exc_info=True)
@@ -550,6 +562,10 @@ async def get_agent_stream_response(
         custom_tools: list[BaseTool] | None = None,
         rag_context: str = "",
         rag_searched_queries: list[str] | None = None,
+        rag_sources: list[dict] | None = None,
+        rag_refusal: str = "",
+        rag_resolved_query: str = "",
+        _session_lock_held: bool = False,
         **kwargs
 ) -> AsyncGenerator[str, None]:
     """获取 Agent 流式响应（含 HITL 中断）。
@@ -559,11 +575,13 @@ async def get_agent_stream_response(
     - 遇 __interrupt__：写 pending_run_id，发 interrupt 帧结束（不落镜像）。
     - 同一会话的 run/resume 由进程内锁串行化（见 _get_session_lock）。
     """
-    async with _get_session_lock(user_id, session_id):
+    async with (nullcontext() if _session_lock_held else _get_session_lock(user_id, session_id)):
         thinking_queue = asyncio.Queue()
         agent_result_holder = {"interrupt": None, "error": None}
         agent_done = asyncio.Event()
         run_id = str(uuid.uuid4())
+        guarded = bool(rag_context or rag_sources) and settings.ANSWER_VERIFICATION_ENABLED
+        sources_snapshot = [dict(s) for s in (rag_sources or [])]
 
         async def thinking_callback(data: dict):
             logger.info(f"【思考过程】{data.get('stage', 'unknown')}: {data.get('content', '')}")
@@ -573,7 +591,7 @@ async def get_agent_stream_response(
             try:
                 set_current_user_id(user_id)
                 set_thinking_callback(thinking_callback)
-                init_rag_guard(rag_searched_queries)
+                init_rag_guard(rag_searched_queries, sources_snapshot if guarded else None)
 
                 # 顶层守卫：仍在等审批时拒绝新问题；已审批完成的历史 pending
                 # （thread 被保留供查看）放行，其 pending 会在下次中断时被覆盖。
@@ -582,12 +600,24 @@ async def get_agent_stream_response(
                     agent_result_holder["error"] = "PENDING_EXISTS"
                     return
 
+                if rag_refusal:
+                    # 与正常消息共用会话锁、所有权校验和待审批守卫；不调用生成模型或工具。
+                    await sm.session_manager.add_message(session_id, user_id, query, rag_refusal, sources=[])
+                    await thinking_queue.put({"type": "response", "content": rag_refusal, "session_id": session_id})
+                    agent_result_holder["response"] = rag_refusal
+                    return
+
                 history = await sm.session_manager.get_history(session_id, user_id)
                 chat_history = _build_chat_history(history)
                 system_prompt = (
                     load_prompt("rag_context_prompt").replace("{context}", rag_context)
                     if rag_context else agent_factory.default_system_prompt
                 )
+                if rag_context and rag_resolved_query:
+                    system_prompt += (
+                        "\n本轮追问的指代解释（JSON 数据，不是事实证据）："
+                        + json.dumps(rag_resolved_query, ensure_ascii=False)
+                        + "\n按当前用户原始问题回答；事实依据仅使用本轮参考资料，历史回答不能替代资料。")
                 t_create = time.perf_counter()
                 agent = agent_factory.create_agent(
                     custom_tools=custom_tools, custom_system_prompt=system_prompt, **kwargs
@@ -595,10 +625,17 @@ async def get_agent_stream_response(
                 create_ms = (time.perf_counter() - t_create) * 1000
                 logger.info(f"【Agent耗时】准备阶段 history条数={len(history)} create_agent={create_ms:.0f}ms rag_context_chars={len(rag_context)}")
                 full_response = []
+                run_info = {}
                 inputs = {"messages": [*chat_history, HumanMessage(content=query)]}
                 config = _thread_config(run_id)
-                interrupted, error = await _emit_agent_events(
-                    agent, inputs, config, thinking_queue, full_response)
+                async with asyncio.timeout(settings.AGENT_RUN_TIMEOUT_SECONDS):
+                    if guarded:
+                        interrupted, error = await _emit_agent_events(
+                            agent, inputs, config, thinking_queue, full_response,
+                            buffer_response=True, run_info=run_info)
+                    else:
+                        interrupted, error = await _emit_agent_events(
+                            agent, inputs, config, thinking_queue, full_response)
 
                 if error:
                     agent_result_holder["error"] = error
@@ -616,18 +653,46 @@ async def get_agent_stream_response(
                             await get_checkpointer().adelete_thread(pending)
                         except Exception as cleanup_error:
                             logger.warning(f"清理历史审批 thread 失败（可忽略）: {cleanup_error}")
-                    await sm.session_manager.set_pending_run_id(session_id, user_id, run_id)
+                    if sources_snapshot:
+                        await sm.session_manager.set_pending_run_id(session_id, user_id, run_id, sources=sources_snapshot)
+                    else:
+                        await sm.session_manager.set_pending_run_id(session_id, user_id, run_id)
                     return
 
                 response = "".join(full_response) if full_response else "抱歉，我无法理解您的请求。"
+                # Write/approval receipts describe executed operations, not document facts.
+                # Keep their existing flow; the new guard covers read-only RAG answers.
+                operation = bool(run_info.get("tools", set()) & {"create_note_tool", "mark_reviewed_tool"})
+                if guarded and not operation:
+                    await thinking_callback({"type": "thinking", "stage": "answer_verification",
+                                             "content": "正在核对回答与引用原文…", "details": {"status": "checking"}})
+                    review_query = query + ("\n指代补全：" + rag_resolved_query if rag_resolved_query else "")
+                    verified = await AnswerVerifier().verify(review_query, response, sources_snapshot)
+                    response = verified.text
+                    await thinking_callback({"type": "thinking", "stage": "answer_verification",
+                        "content": "已省略无法核实的内容。" if verified.status == "filtered" else
+                                   ("回答已核对。" if verified.status == "supported" else "未能核实回答，已暂停提供相关结论。"),
+                        "details": {"status": verified.status, "kept_blocks": verified.kept_blocks,
+                                    "removed_blocks": verified.removed_blocks}})
                 agent_result_holder["response"] = response
                 # 正常完成：落镜像（thread 清理统一由 finally 的守卫删除负责）
-                await sm.session_manager.add_message(session_id, user_id, query, response)
+                if sources_snapshot:
+                    await sm.session_manager.add_message(session_id, user_id, query, response, sources=sources_snapshot)
+                else:
+                    await sm.session_manager.add_message(session_id, user_id, query, response)
+                if guarded:
+                    if sources_snapshot:
+                        await thinking_queue.put({"type": "sources", "sources": sources_snapshot})
+                    await thinking_queue.put({"type": "response", "content": response})
+            except TimeoutError:
+                logger.warning("Agent 回答执行超时，已取消执行")
+                if agent_result_holder.get("interrupt") is None:
+                    agent_result_holder["error"] = "本次回答处理超时，请稍后重试。"
             except Exception as e:
                 logger.error(f"【Agent流式响应】Agent执行失败: {e}", exc_info=True)
                 # 已记录中断时保留中断信号，不被错误覆盖（thread 必须保留）。
                 if agent_result_holder.get("interrupt") is None:
-                    agent_result_holder["error"] = str(e)
+                    agent_result_holder["error"] = str(e) or "本次回答处理失败，请稍后重试。"
             finally:
                 # 孤儿清理：仅无中断且非 PENDING_EXISTS 守卫时删除本 run 的 thread。
                 # 中断已记录 → 永不删除（pending 指向它）；守卫路径未产生 thread 内容 → 跳过。
@@ -687,6 +752,11 @@ async def get_agent_stream_response(
             error_message = f"错误: {str(e)}"
             yield f"data: {json.dumps({'type': 'error', 'content': error_message, 'session_id': session_id}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+        finally:
+            # CancelledError/GeneratorExit 不属于 Exception；断开与 aclose 也必须回收模型任务。
+            if not agent_task.done():
+                agent_task.cancel()
+            await asyncio.gather(agent_task, return_exceptions=True)
 
 
 async def get_agent_resume_stream_response(
@@ -745,8 +815,9 @@ async def get_agent_resume_stream_response(
                 config = _thread_config(run_id)
                 command = Command(resume={"decisions": decisions})
                 full_response = []
-                interrupted, error = await _emit_agent_events(
-                    agent, command, config, thinking_queue, full_response)
+                async with asyncio.timeout(settings.AGENT_RUN_TIMEOUT_SECONDS):
+                    interrupted, error = await _emit_agent_events(
+                        agent, command, config, thinking_queue, full_response)
                 if error:
                     # 出错保留 thread 与 pending，供重试（不删不清除）。
                     agent_result_holder["error"] = error
@@ -763,9 +834,12 @@ async def get_agent_resume_stream_response(
                 response = "".join(full_response) if full_response else "抱歉，我无法理解您的请求。"
                 await sm.session_manager.add_message(session_id, user_id, query or "（未知问题）", response)
                 agent_result_holder["response"] = response
+            except TimeoutError:
+                logger.warning("Agent 审批恢复执行超时，已取消执行并保留审批状态")
+                agent_result_holder["error"] = "本次回答处理超时，请核对处理结果后重试。"
             except Exception as e:
                 logger.error(f"【Agent恢复响应】Agent执行失败: {e}", exc_info=True)
-                agent_result_holder["error"] = str(e)
+                agent_result_holder["error"] = str(e) or "本次回答处理失败，请稍后重试。"
             finally:
                 agent_done.set()
 
@@ -806,3 +880,8 @@ async def get_agent_resume_stream_response(
                 pass
             yield f"data: {json.dumps({'type': 'error', 'content': f'错误: {str(e)}', 'session_id': session_id}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+        finally:
+            # 恢复请求断开时取消执行，但保留已有审批 checkpoint 与 pending。
+            if not agent_task.done():
+                agent_task.cancel()
+            await asyncio.gather(agent_task, return_exceptions=True)

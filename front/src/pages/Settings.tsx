@@ -29,8 +29,11 @@ export default function Settings() {
               </div>
             </div>
             <button
+              role="switch"
+              aria-checked={theme === 'dark'}
+              aria-label={t('settings.theme')}
               onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-              className={`relative w-12 h-6 rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-bg-tertiary)]'}`}
+              className={`relative w-12 h-6 rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--color-action)]' : 'bg-[var(--color-bg-tertiary)]'}`}
             >
               <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${theme === 'dark' ? 'translate-x-6' : 'translate-x-0.5'}`} />
             </button>

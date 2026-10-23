@@ -32,6 +32,8 @@ async def test_create_note_triggers_extraction_and_delete_cleans(db_session, ses
                                                                  neo4j_env, _cleanup):
     uid = "pipe-" + uuid.uuid4().hex[:8]
     from app.core.background_init import init_manager
+    from tests.graph.test_neo4j_pipeline import FakeEmbed
+    monkeypatch.setattr(init_manager, "embed_model", FakeEmbed())
     monkeypatch.setattr(init_manager, "chat_model",
                         make_fake_chat_model(['{"entities": [{"name": "Python", "mentions": ["Python"]}], "relations": []}']))
     monkeypatch.setattr("app.graph.services.graph_service.AsyncSessionLocal", session_factory)
@@ -40,6 +42,7 @@ async def test_create_note_triggers_extraction_and_delete_cleans(db_session, ses
     note_id = note.id
     await asyncio.sleep(0.05)  # note_service 内 create_task 触发的入队先落地
     from app.graph.services.graph_worker import _tick
+    assert await _tick("index") is True
     assert await _tick() is True  # worker 消费构建任务
     log = (await db_session.execute(select(GraphExtractLog).where(
         GraphExtractLog.note_id == note_id))).scalar_one()

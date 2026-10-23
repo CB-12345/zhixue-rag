@@ -200,7 +200,7 @@ export default function GraphPage() {
           {types.map((ty) => <option key={ty.id} value={ty.id}>{ty.display_name}</option>)}
         </select>
         <button onClick={() => { setFitSignal((s) => s + 1); void reload() }}
-          className="rounded bg-[var(--color-accent)] px-2 py-1 text-sm text-white">{t('graph.refresh')}</button>
+          className="rounded bg-[var(--color-action)] px-2 py-1 text-sm text-white">{t('graph.refresh')}</button>
       </div>
 
       <GraphCanvas view={view} typeColors={typeColors} onSelectNode={onSelectNode}
@@ -216,7 +216,7 @@ export default function GraphPage() {
           <div className="pointer-events-auto">
             <EmptyState icon={<Network size={48} />} message={t(failed ? 'graph.loadFailed' : 'graph.emptyMessage')}
               action={<button onClick={() => { setLoading(true); void reload() }}
-                className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-sm text-white">{t('graph.retry')}</button>} />
+                className="rounded bg-[var(--color-action)] px-3 py-1.5 text-sm text-white">{t('graph.retry')}</button>} />
           </div>
         </div>
       )}

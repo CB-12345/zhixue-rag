@@ -91,7 +91,7 @@ export function EntityDetailPanel({ nodeId, nodeType, types = [], onClose, onCha
         {closeBtn}
         <h2 className="text-lg font-semibold">{t('graph.noteTitle')}</h2>
         <p className="mt-2 break-all text-sm text-[var(--color-text-secondary)]">{nodeId}</p>
-        <button className="mt-4 rounded bg-[var(--color-accent)] px-2 py-1 text-sm text-white"
+        <button className="mt-4 rounded bg-[var(--color-action)] px-2 py-1 text-sm text-white"
           onClick={() => navigate(`/notes/${nodeId}`)}>
           {t('graph.openNote')}
         </button>
@@ -118,7 +118,7 @@ export function EntityDetailPanel({ nodeId, nodeType, types = [], onClose, onCha
             ))}
           </ul>
         </div>
-        <button className="mt-4 rounded bg-[var(--color-accent)] px-2 py-1 text-sm text-white"
+        <button className="mt-4 rounded bg-[var(--color-action)] px-2 py-1 text-sm text-white"
           onClick={() => navigate('/knowledge')}>
           {t('graph.openDoc')}
         </button>

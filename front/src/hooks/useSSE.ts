@@ -1,10 +1,11 @@
-import { useRef, useState, useCallback } from 'react'
-import type { SSEMessage, KnowledgeSSEMessage } from '../types/api'
+import { useRef, useState, useCallback, useEffect } from 'react'
+import type { SSEMessage, KnowledgeSSEMessage, AnswerSource } from '../types/api'
 import { JWT_KEY } from '../api/client'
 
 type SSECallback = {
   onThinking?: (stage: string, content?: string, details?: Record<string, unknown>) => void
   onResponse?: (content: string, sessionId?: string) => void
+  onSources?: (sources: AnswerSource[]) => void
   onDone?: (sessionId?: string) => void
   onError?: (error: string) => void
   onInterrupt?: (msg: SSEMessage) => void
@@ -15,12 +16,15 @@ export function useSSE() {
   const abortRef = useRef<AbortController | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const start = useCallback(
     async (url: string, body: Record<string, unknown> | FormData, callbacks: SSECallback) => {
       setLoading(true)
       setError(null)
-      abortRef.current = new AbortController()
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
 
       try {
         const token = localStorage.getItem(JWT_KEY)
@@ -33,7 +37,7 @@ export function useSSE() {
             ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
           },
           body: isFormData ? body : JSON.stringify(body),
-          signal: abortRef.current.signal,
+          signal: controller.signal,
         })
 
         if (!response.ok) {
@@ -53,6 +57,7 @@ export function useSSE() {
 
         const decoder = new TextDecoder()
         let buffer = ''
+        let terminal = false
 
         // Forward model tokens immediately; batching makes the UI look fake-streamed.
         const responseBuffer: string[] = []
@@ -82,6 +87,7 @@ export function useSSE() {
                 if (data.event_type) {
                   callbacks.onKnowledgeProgress?.(data as KnowledgeSSEMessage)
                   if (data.event_type === 'finish') {
+                    terminal = true
                     callbacks.onDone?.()
                   }
                   continue
@@ -90,6 +96,9 @@ export function useSSE() {
                 // Handle chat SSE format
                 const msg = data as SSEMessage
                 switch (msg.type) {
+                  case 'sources':
+                    callbacks.onSources?.(msg.sources || [])
+                    break
                   case 'thinking':
                     flushResponse()
                     callbacks.onThinking?.(msg.stage || '', msg.content, msg.details as Record<string, unknown> | undefined)
@@ -99,15 +108,18 @@ export function useSSE() {
                     callbacks.onResponse?.(msg.content || '', lastSessionId)
                     break
                   case 'done':
+                    terminal = true
                     flushResponse()
                     callbacks.onDone?.(msg.session_id)
                     break
                   case 'error':
+                    terminal = true
                     flushResponse()
                     callbacks.onError?.(msg.content || 'Unknown error')
                     setError(msg.content || 'Unknown error')
                     break
                   case 'interrupt':
+                    terminal = true
                     flushResponse()
                     callbacks.onInterrupt?.(msg)
                     break
@@ -118,13 +130,18 @@ export function useSSE() {
             }
           }
         }
+        if (!terminal && !controller.signal.aborted) {
+          const message = '连接提前结束，请检查网络后重试'
+          setError(message)
+          callbacks.onError?.(message)
+        }
       } catch (err: unknown) {
         if (err instanceof Error && err.name !== 'AbortError') {
           callbacks.onError?.(err.message)
           setError(err.message)
         }
       } finally {
-        setLoading(false)
+        if (abortRef.current === controller) setLoading(false)
       }
     },
     []

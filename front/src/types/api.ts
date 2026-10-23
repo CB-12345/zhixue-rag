@@ -69,8 +69,8 @@ export interface ChatSession {
   user_id?: string
   title: string
   metadata?: Record<string, unknown>
-  created_at: string
-  updated_at: string
+  created_at: string | null
+  updated_at: string | null
   pending_run_id?: string | null
 }
 
@@ -86,20 +86,22 @@ export interface ChatMessage {
 export interface KnowledgeDocument {
   id: string
   user_id: string
-  md5: string
   filename: string
-  file_size: number
-  file_type: string
   status: string
+  graph_status?: string
+  graph_attempts?: number
+  graph_error_message?: string | null
+  attempts: number
+  error_message?: string | null
   chunk_count: number
-  created_at: string
+  created_at: string | null
 }
 
 export interface KnowledgeChunk {
   chunk_id: string
   index: number
   content: string
-  page: number
+  page: number | null
   images: string[]
 }
 
@@ -172,8 +174,21 @@ export interface ApprovalPayload {
   review_configs: ApprovalReviewConfig[]
 }
 
+export interface AnswerSource {
+  number: number
+  id: string
+  source: 'note' | 'knowledge_base' | 'graph' | 'web'
+  title: string
+  content: string
+  source_id?: string | null
+  page?: number | null
+  chunk_index?: number | null
+  url?: string | null
+}
+
 export interface SSEMessage {
-  type: 'thinking' | 'response' | 'done' | 'error' | 'interrupt'
+  type: 'thinking' | 'response' | 'done' | 'error' | 'interrupt' | 'sources'
+  sources?: AnswerSource[]
   content?: string
   session_id?: string
   stage?: string
@@ -183,7 +198,9 @@ export interface SSEMessage {
 }
 
 export interface KnowledgeSSEMessage {
-  event_type: 'processing' | 'completed' | 'error' | 'finish'
+  event_type: 'start' | 'processing' | 'slicing_completed' | 'writing' | 'completed' | 'error' | 'finish'
+  file_index?: number
+  step?: string
   filename?: string
   progress?: number
   current?: number

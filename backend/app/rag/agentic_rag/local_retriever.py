@@ -159,5 +159,5 @@ class LocalRetriever:
             title=hit.source_name or ("笔记" if hit.kind == "note" else "知识库文档"),
             content=hit.text,
             score=hit.score,
-            metadata={"source_id": hit.source_id, "chunk_index": hit.chunk_index, **hit.metadata},
+            metadata={**hit.metadata, "source_id": hit.source_id, "chunk_index": hit.chunk_index, "page": hit.page},
         )
