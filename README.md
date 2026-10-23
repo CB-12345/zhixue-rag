@@ -55,9 +55,12 @@ flowchart LR
 
 ## 快速启动
 
-安装并启动 Docker Desktop，下载或克隆本仓库后，在项目根目录执行：
+安装并启动 Docker Desktop，然后克隆项目并复制配置：
 
 ```bash
+git clone https://github.com/CB-12345/zhixue-rag.git
+cd zhixue-rag
+
 cp backend/.env.example backend/.env
 # 编辑 backend/.env，填写模型配置和自己的 SECRET_KEY
 
