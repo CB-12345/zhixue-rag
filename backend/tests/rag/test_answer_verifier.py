@@ -437,10 +437,10 @@ def test_headings_with_facts_numbers_references_or_unknown_qualifiers_are_not_la
     assert mod._review_blocks(draft) == [title, '36小时内反馈[1]。']
 
 
-def test_captured_missing_heading_indices_were_the_only_omitted_units():
+def test_layout_headings_attach_to_content_and_reject_incomplete_reviews():
     from pathlib import Path
 
-    case = json.loads((Path(__file__).resolve().parents[2] / 'evaluation/answer_heading_v1.json').read_bytes())['cases'][0]
+    case = json.loads((Path(__file__).resolve().parents[1] / 'fixtures/answer_heading.json').read_bytes())['cases'][0]
     blocks, groups = mod._review_units(case['draft'])
     assert len(blocks) == 7 and set(groups) == {2, 3, 4, 5}
     assert blocks[0].startswith('## 各自生成什么\n\n**MQE')

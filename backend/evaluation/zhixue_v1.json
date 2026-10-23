@@ -1,93 +1,1210 @@
 {
-  "version": "zhixue-rag-v1",
-  "description": "人工编写的中文学习助手回归集。全部资料为虚构练习规范，非生产指标或公开基准；题目与标注固定，禁止按本集调参后宣称泛化提升。",
-  "annotation": "相关性按文档级二元支持标注。历史草案是困难负例，不支持关于现行规范的问题。缺失信息题不参与 IR 均值，单独检查拒答措辞并保留回答供人工核对。required_terms 仅为答案要点字符串启发式，不能替代正确性或忠实度人工评价。",
+  "version": "zhixue-rag-examples-v2",
+  "description": "自编检索示例：24 份虚构学习资料与 60 个问题，覆盖事实、语义、多来源、归档干扰和资料不足。",
+  "annotation": "相关来源用于标注答案依据；required_terms 仅作关键词检查，不能替代答案语义和引用支持核对。",
   "documents": [
-    {"id":"d01","title":"现行规范：资料切片与学习记录 LRN-101","text":"状态：已采纳的现行练习规范。LRN-101 资料切片负责人是沈若溪。中文讲义按标题和段落优先切分，每片最多 640 个字符，相邻切片重叠 80 个字符。不要把字符数说成 token 数。标题应随切片保留，以免孤立段落丢失主题。此规范取代归档的 512/64 草案。"},
-    {"id":"d02","title":"现行规范：HYB-2048 混合检索学习卡","text":"状态：现行练习规范。学习记录 HYB-2048 的实验负责人是周予安。向量检索负责语义近似表达，全文关键词检索负责错误码、编号等精确词项。两路通过 RRF 融合，常数 k 为 60。RRF 是排名融合分数，不能解释成答案正确概率。先召回候选，再选择少量证据交给回答模型。"},
-    {"id":"d03","title":"现行规范：相关性重排序 RANK-303","text":"状态：现行练习规范。RANK-303 使用 BAAI/bge-reranker-v2-m3 作为示例重排序模型。每个文本检索步骤取 20 个候选，最终本地上下文最多 8 条。重排序总等待上限为 8 秒。服务未配置、超时或响应索引重复、缺项时保留原检索顺序；不能把只收到的部分评分当作完整结果。服务返回的 index 对应输入文档位置，来源必须按 index 映射。"},
-    {"id":"d04","title":"现行规范：回答来源与页码 CIT-404","text":"状态：现行练习规范。CIT-404 规定正文用 [1]、[2] 形式对应参考资料编号，编号随最终上下文顺序生成。PDF 原始页码可以保存；DOCX 没有稳定排版页码时不能编造页码。每轮对话保留来源片段快照，刷新后仍可核对。来源卡说明检索依据存在，但不自动证明答案中每一句都得到支持。"},
-    {"id":"d05","title":"现行规范：文档更新与独立索引 IDX-505","text":"状态：现行练习规范。IDX-505 将基础索引与实体图谱分别放入独立消费循环。基础索引依赖 Embedding 与 Neo4j，完成后可检索，不必等待实体抽取。更新时先计算完整的新向量，成功后原子替换该来源的切片集合；失败则保留旧集合。正文重新编辑会使 index_run_token 与 run_token 失效，旧任务在模型调用后复检来源和令牌，不得写回过时内容。"},
-    {"id":"d06","title":"现行规范：评测口径 EVAL-606","text":"状态：现行练习规范。EVAL-606 把检索层和回答层分开。Recall@5 衡量前五项召回了多少相关文档，MRR 看第一个相关结果的排名，nDCG 衡量相关结果的排序位置。多来源题必须检查全部必需来源。回答层另看事实正确、证据支持和资料缺失时的拒答。不能把关键词命中率等同于答案准确率，也不能把训练集上的成绩当成独立测试成绩。"},
-    {"id":"d07","title":"现行规范：用户隔离与上传安全 SEC-707","text":"状态：现行练习规范。SEC-707 要求 MySQL 查询、Neo4j 检索和删除均带 user_id。不同用户上传相同 md5 的文档也不能互相读取。会话查询要验证所有者，越权访问返回 403。密钥放在本机环境配置，不能发到页面或写入报告。上传只允许受支持的非空文档，单个文件上限为 20MB。"},
-    {"id":"d08","title":"现行规范：文档解析 PARSE-808","text":"状态：现行练习规范。PARSE-808 采用 python-docx 读取 DOCX 标题、中文段落和普通表格，并保持正文顺序；表格可转为 Markdown。异步入口把同步解析放入工作线程。扫描 PDF 如果没有可用 OCR，不能声称已经提取到图片里的文字；应报告解析缺失。破损或空白文件应明确处理，不把空正文当作有效知识。"},
-    {"id":"d09","title":"现行规范：历史对话与证据恢复 CHAT-909","text":"状态：现行练习规范。CHAT-909 把历史对话放在 AI 问答页的抽屉中，保留新建、查看与删除确认。刷新会话时，回答与各轮来源快照一起恢复，不能把上一次回答的来源挪到下一轮。流式连接中断要展示错误并恢复输入。删除会话必须确认，后台也必须检查该会话属于当前用户。"},
-    {"id":"d10","title":"现行规范：证据不足与拒答 SAFE-100","text":"状态：现行练习规范。SAFE-100 要求只依据给定资料作答。资料没有记录的问题应明确说未提供或证据不足，不能从相近编号、草案或常识中猜数值。对于现行规范的问题，归档草案不能代替现行依据。评测时关闭外部搜索，避免把网上知识充当本地证据。重排序高分表示模型判断相关，不保证该段资料包含所问事实。"},
-    {"id":"d11","title":"现行规范：耗时测量与后台并发 PERF-111","text":"状态：现行练习规范。PERF-111 分别记录检索、重排序、回答生成耗时，并报告 P50 与 P95。P95 表示 95% 的样本耗时不高于该值，不是 95% 的请求成功。评测默认并发为 2，最多为 4。两个 asyncio 消费循环可以避免慢图谱阻塞下一份文档索引，但不意味着模型 API 变快；同步 Embedding 调用仍须放入工作线程。"},
-    {"id":"d12","title":"现行规范：项目展示与实习表述 CV-121","text":"状态：现行练习规范。CV-121 要求简历说明基于开源项目二次开发，并列出自己完成的索引解耦、来源恢复、重排序接入或评测工作。现成对话与 Embedding API 的使用不能写成训练了基础模型或做了 LoRA 微调。没有重排序服务的实测对照，就不能声称准确率提升百分之多少。实验应保存固定题集、配置、失败记录和可复现的报告。"},
-    {"id":"d13","title":"归档草案：LRN-101 的旧切片方案","text":"状态：归档，已被现行规范取代。LRN-101 草案曾建议每片 512 字符，重叠 64 字符，草案整理人赵启明。这里只记录历史候选方案，不能用于回答当前采用的切片长度、重叠长度或负责人。"},
-    {"id":"d14","title":"归档草案：HYB-2048 的向量单路试验","text":"状态：归档，非现行方案。HYB-2048 早期只试验过向量检索，由田知远记录；编号和错误码召回不稳定。草案曾把相似分数展示为百分比，这个展示方式已废弃。本页不是现行混合检索负责人的依据。"},
-    {"id":"d15","title":"归档草案：RANK-303 的超时与候选","text":"状态：归档，不再采用。RANK-303 旧候选方案为召回 10 项、保留 3 项、超时 30 秒。旧实现用正文字符串反查来源且没有检查响应缺项，后来决定废弃。查询当前重排序预算时应查现行规范。"},
-    {"id":"d16","title":"归档草案：CIT-404 只有文末链接","text":"状态：归档，未采纳。CIT-404 早期界面只有文末链接，没有每轮来源快照。草案拟给 Word 文件填一个固定第一页，但这个建议已否决。此页不能证明当前规范允许伪造页码。"},
-    {"id":"d17","title":"归档草案：IDX-505 串行构建","text":"状态：归档，已替换。IDX-505 旧流程先抽实体，再生成向量，只有一个队列消费者。更新时先删除旧切片再调用模型，因此失败会让原检索不可用。本页说明旧问题，不是当前索引流程。"},
-    {"id":"d18","title":"归档草案：EVAL-606 的旧验收方式","text":"状态：归档，未采纳。EVAL-606 早期拟用三道熟悉的问题和关键词命中数代替全部质量评价，还曾把没有相关资料的题目算作满分召回。没有得到可发布的准确率数据；该方法不适用于现行评测规范。"},
-    {"id":"d19","title":"归档草案：SEC-707 共享文档缓存","text":"状态：归档，已否决。SEC-707 旧建议只用文件 md5 缓存文档，不在读取时检查用户；这会造成相同文件跨用户串读。草案写过单文件 50MB，但它不是现行上传上限。"},
-    {"id":"d20","title":"归档草案：PARSE-808 按纯文本读取 Word","text":"状态：归档，已废弃。PARSE-808 旧尝试把 DOCX 直接当作纯文本文件读取，中文、段落与表格都可能丢失。当时扫描 PDF 没有 OCR。不要把这条失败路径当成当前 DOCX 解析器。"},
-    {"id":"d21","title":"归档草案：CHAT-909 单独会话管理页","text":"状态：归档，界面方案已收敛。CHAT-909 旧界面在主导航单独提供会话管理页，来源只保存在浏览器内存，刷新会丢失。当前是否有每轮来源快照不能依据本页判断。"},
-    {"id":"d22","title":"归档草案：SAFE-100 强制填满答案","text":"状态：归档，已否决。SAFE-100 旧提示词要求资料不足也给一个估计数字，这会让模型编造事实。没有真实用户量或采购成本记录，不能把估计答案作为正确答案。"},
-    {"id":"d23","title":"归档草案：PERF-111 只记平均耗时","text":"状态：归档，未采纳。PERF-111 曾只记录平均耗时、使用并发 8，未区分重排序与生成。此草案没有可信的 P95 报告，也不是当前的并发设置。"},
-    {"id":"d24","title":"归档草案：CV-121 的项目宣传语","text":"状态：归档，已否决。CV-121 曾出现自研基础大模型、准确率提升 50% 等未经实验支持的宣传语。它们不是项目成果，不可写入现行简历或用作事实答案。"}
+    {
+      "id": "d01",
+      "title": "现行规范：资料切片与学习记录 LRN-101",
+      "text": "状态：已采纳的现行练习规范。LRN-101 资料切片负责人是沈若溪。中文讲义按标题和段落优先切分，每片最多 640 个字符，相邻切片重叠 80 个字符。不要把字符数说成 token 数。标题应随切片保留，以免孤立段落丢失主题。此规范取代归档的 512/64 草案。"
+    },
+    {
+      "id": "d02",
+      "title": "现行规范：HYB-2048 混合检索学习卡",
+      "text": "状态：现行练习规范。学习记录 HYB-2048 的实验负责人是周予安。向量检索负责语义近似表达，全文关键词检索负责错误码、编号等精确词项。两路通过 RRF 融合，常数 k 为 60。RRF 是排名融合分数，不能解释成答案正确概率。先召回候选，再选择少量证据交给回答模型。"
+    },
+    {
+      "id": "d03",
+      "title": "现行规范：相关性重排序 RANK-303",
+      "text": "状态：现行练习规范。RANK-303 使用 BAAI/bge-reranker-v2-m3 作为示例重排序模型。每个文本检索步骤取 20 个候选，最终本地上下文最多 8 条。重排序总等待上限为 8 秒。服务未配置、超时或响应索引重复、缺项时保留原检索顺序；不能把只收到的部分评分当作完整结果。服务返回的 index 对应输入文档位置，来源必须按 index 映射。"
+    },
+    {
+      "id": "d04",
+      "title": "现行规范：回答来源与页码 CIT-404",
+      "text": "状态：现行练习规范。CIT-404 规定正文用 [1]、[2] 形式对应参考资料编号，编号随最终上下文顺序生成。PDF 原始页码可以保存；DOCX 没有稳定排版页码时不能编造页码。每轮对话保留来源片段快照，刷新后仍可核对。来源卡说明检索依据存在，但不自动证明答案中每一句都得到支持。"
+    },
+    {
+      "id": "d05",
+      "title": "现行规范：文档更新与独立索引 IDX-505",
+      "text": "状态：现行练习规范。IDX-505 将基础索引与实体图谱分别放入独立消费循环。基础索引依赖 Embedding 与 Neo4j，完成后可检索，不必等待实体抽取。更新时先计算完整的新向量，成功后原子替换该来源的切片集合；失败则保留旧集合。正文重新编辑会使 index_run_token 与 run_token 失效，旧任务在模型调用后复检来源和令牌，不得写回过时内容。"
+    },
+    {
+      "id": "d06",
+      "title": "现行规范：评测口径 EVAL-606",
+      "text": "状态：现行练习规范。EVAL-606 把检索层和回答层分开。Recall@5 衡量前五项召回了多少相关文档，MRR 看第一个相关结果的排名，nDCG 衡量相关结果的排序位置。多来源题必须检查全部必需来源。回答层另看事实正确、证据支持和资料缺失时的拒答。不能把关键词命中率等同于答案准确率，也不能把训练集上的成绩当成独立测试成绩。"
+    },
+    {
+      "id": "d07",
+      "title": "现行规范：用户隔离与上传安全 SEC-707",
+      "text": "状态：现行练习规范。SEC-707 要求 MySQL 查询、Neo4j 检索和删除均带 user_id。不同用户上传相同 md5 的文档也不能互相读取。会话查询要验证所有者，越权访问返回 403。密钥放在本机环境配置，不能发到页面或写入报告。上传只允许受支持的非空文档，单个文件上限为 20MB。"
+    },
+    {
+      "id": "d08",
+      "title": "现行规范：文档解析 PARSE-808",
+      "text": "状态：现行练习规范。PARSE-808 采用 python-docx 读取 DOCX 标题、中文段落和普通表格，并保持正文顺序；表格可转为 Markdown。异步入口把同步解析放入工作线程。扫描 PDF 如果没有可用 OCR，不能声称已经提取到图片里的文字；应报告解析缺失。破损或空白文件应明确处理，不把空正文当作有效知识。"
+    },
+    {
+      "id": "d09",
+      "title": "现行规范：历史对话与证据恢复 CHAT-909",
+      "text": "状态：现行练习规范。CHAT-909 把历史对话放在 AI 问答页的抽屉中，保留新建、查看与删除确认。刷新会话时，回答与各轮来源快照一起恢复，不能把上一次回答的来源挪到下一轮。流式连接中断要展示错误并恢复输入。删除会话必须确认，后台也必须检查该会话属于当前用户。"
+    },
+    {
+      "id": "d10",
+      "title": "现行规范：证据不足与拒答 SAFE-100",
+      "text": "状态：现行练习规范。SAFE-100 要求只依据给定资料作答。资料没有记录的问题应明确说未提供或证据不足，不能从相近编号、草案或常识中猜数值。对于现行规范的问题，归档草案不能代替现行依据。评测时关闭外部搜索，避免把网上知识充当本地证据。重排序高分表示模型判断相关，不保证该段资料包含所问事实。"
+    },
+    {
+      "id": "d11",
+      "title": "现行规范：耗时测量与后台并发 PERF-111",
+      "text": "状态：现行练习规范。PERF-111 分别记录检索、重排序、回答生成耗时，并报告 P50 与 P95。P95 表示 95% 的样本耗时不高于该值，不是 95% 的请求成功。评测默认并发为 2，最多为 4。两个 asyncio 消费循环可以避免慢图谱阻塞下一份文档索引，但不意味着模型 API 变快；同步 Embedding 调用仍须放入工作线程。"
+    },
+    {
+      "id": "d12",
+      "title": "现行规范：资料借阅 LB-121",
+      "text": "状态：现行练习规范。LB-121 要求借阅时登记姓名、资料编号和归还日期。每次最多借阅3份资料，默认借期7天。延期需提前1天申请。电子讲义可以远程归还登记；纸质资料必须到管理台归还。没有完成登记不能取走纸质资料。"
+    },
+    {
+      "id": "d13",
+      "title": "归档草案：LRN-101 的旧切片方案",
+      "text": "状态：归档，已被现行规范取代。LRN-101 草案曾建议每片 512 字符，重叠 64 字符，草案整理人赵启明。这里只记录历史候选方案，不能用于回答当前采用的切片长度、重叠长度或负责人。"
+    },
+    {
+      "id": "d14",
+      "title": "归档草案：HYB-2048 的向量单路试验",
+      "text": "状态：归档，非现行方案。HYB-2048 早期只试验过向量检索，由田知远记录；编号和错误码召回不稳定。草案曾把相似分数展示为百分比，这个展示方式已废弃。本页不是现行混合检索负责人的依据。"
+    },
+    {
+      "id": "d15",
+      "title": "归档草案：RANK-303 的超时与候选",
+      "text": "状态：归档，不再采用。RANK-303 旧候选方案为召回 10 项、保留 3 项、超时 30 秒。旧实现用正文字符串反查来源且没有检查响应缺项，后来决定废弃。查询当前重排序预算时应查现行规范。"
+    },
+    {
+      "id": "d16",
+      "title": "归档草案：CIT-404 只有文末链接",
+      "text": "状态：归档，未采纳。CIT-404 早期界面只有文末链接，没有每轮来源快照。草案拟给 Word 文件填一个固定第一页，但这个建议已否决。此页不能证明当前规范允许伪造页码。"
+    },
+    {
+      "id": "d17",
+      "title": "归档草案：IDX-505 串行构建",
+      "text": "状态：归档，已替换。IDX-505 旧流程先抽实体，再生成向量，只有一个队列消费者。更新时先删除旧切片再调用模型，因此失败会让原检索不可用。本页说明旧问题，不是当前索引流程。"
+    },
+    {
+      "id": "d18",
+      "title": "归档草案：EVAL-606 的旧验收方式",
+      "text": "状态：归档，未采纳。EVAL-606 早期拟用三道熟悉的问题和关键词命中数代替全部质量评价，还曾把没有相关资料的题目算作满分召回。没有得到可发布的准确率数据；该方法不适用于现行评测规范。"
+    },
+    {
+      "id": "d19",
+      "title": "归档草案：SEC-707 共享文档缓存",
+      "text": "状态：归档，已否决。SEC-707 旧建议只用文件 md5 缓存文档，不在读取时检查用户；这会造成相同文件跨用户串读。草案写过单文件 50MB，但它不是现行上传上限。"
+    },
+    {
+      "id": "d20",
+      "title": "归档草案：PARSE-808 按纯文本读取 Word",
+      "text": "状态：归档，已废弃。PARSE-808 旧尝试把 DOCX 直接当作纯文本文件读取，中文、段落与表格都可能丢失。当时扫描 PDF 没有 OCR。不要把这条失败路径当成当前 DOCX 解析器。"
+    },
+    {
+      "id": "d21",
+      "title": "归档草案：CHAT-909 单独会话管理页",
+      "text": "状态：归档，界面方案已收敛。CHAT-909 旧界面在主导航单独提供会话管理页，来源只保存在浏览器内存，刷新会丢失。当前是否有每轮来源快照不能依据本页判断。"
+    },
+    {
+      "id": "d22",
+      "title": "归档草案：SAFE-100 强制填满答案",
+      "text": "状态：归档，已否决。SAFE-100 旧提示词要求资料不足也给一个估计数字，这会让模型编造事实。没有真实用户量或采购成本记录，不能把估计答案作为正确答案。"
+    },
+    {
+      "id": "d23",
+      "title": "归档草案：PERF-111 只记平均耗时",
+      "text": "状态：归档，未采纳。PERF-111 曾只记录平均耗时、使用并发 8，未区分重排序与生成。此草案没有可信的 P95 报告，也不是当前的并发设置。"
+    },
+    {
+      "id": "d24",
+      "title": "归档草案：LB-121 的旧借阅规则",
+      "text": "状态：归档，已否决。旧草案曾提出每次最多5份、借期14天。当前借阅规则以现行 LB-121 为准，旧草案不能作为有效规则。"
+    }
   ],
   "questions": [
-    {"id":"q01","category":"fact","query":"现行 LRN-101 资料切片的负责人是谁？","relevant_source_ids":["d01"],"reference_answer":"沈若溪。","required_terms":[["沈若溪"]]},
-    {"id":"q02","category":"fact","query":"目前讲义每片的字符上限和相邻重叠分别是多少？","relevant_source_ids":["d01"],"reference_answer":"每片 640 字符，重叠 80 字符。","required_terms":[["640"],["80"]]},
-    {"id":"q03","category":"semantic","query":"中文讲义怎样分段才能减少标题与正文失去联系？按当前规范回答。","relevant_source_ids":["d01"],"reference_answer":"优先按标题和段落切分，并让切片保留标题。","required_terms":[["标题"],["段落"]]},
-    {"id":"q04","category":"semantic","query":"有人把现行切片长度单位写成 token，这样表述准确吗？","relevant_source_ids":["d01"],"reference_answer":"不准确，规范使用字符数，不能说成 token 数。","required_terms":[["字符"],["不能","不准确","不是"]]},
-    {"id":"q05","category":"fact","query":"HYB-2048 现行混合检索试验由谁负责？","relevant_source_ids":["d02"],"reference_answer":"周予安。","required_terms":[["周予安"]]},
-    {"id":"q06","category":"fact","query":"当前用于融合两路检索排名的方法是什么，常数 k 是多少？","relevant_source_ids":["d02"],"reference_answer":"RRF，k 为 60。","required_terms":[["RRF"],["60"]]},
-    {"id":"q07","category":"semantic","query":"为什么语义近似的问法和产品错误码不能只靠同一种召回？","relevant_source_ids":["d02"],"reference_answer":"向量检索匹配语义，全文关键词检索补充错误码等精确词项。","required_terms":[["语义"],["关键词","全文"],["精确"]]},
-    {"id":"q08","category":"semantic","query":"融合排名的分值可以直接显示成回答正确概率吗？","relevant_source_ids":["d02"],"reference_answer":"不能，RRF 是排名融合分数，不能等同于答案正确概率。","required_terms":[["不能","不等同","不是"],["RRF","排名"]]},
-    {"id":"q09","category":"fact","query":"RANK-303 现行示例使用哪一个重排序模型？","relevant_source_ids":["d03"],"reference_answer":"BAAI/bge-reranker-v2-m3。","required_terms":[["bge-reranker-v2-m3"]]},
-    {"id":"q10","category":"fact","query":"现行相关性重排序每步候选、上下文数量与等待上限分别是多少？","relevant_source_ids":["d03"],"reference_answer":"每步 20 个候选，最多 8 条本地上下文，最多等待 8 秒。","required_terms":[["20"],["8"]]},
-    {"id":"q11","category":"semantic","query":"如果排序供应商只给部分文档返回了分数，应怎样继续问答？","relevant_source_ids":["d03"],"reference_answer":"按异常响应处理，保留原检索顺序，不能把部分评分当作完整结果。","required_terms":[["原","原始"],["顺序","排序"],["完整","部分"]]},
-    {"id":"q12","category":"semantic","query":"两篇资料内容相近时，重排结果应靠哪个字段重新对应来源？","relevant_source_ids":["d03"],"reference_answer":"根据服务返回的 index 映射输入文档位置。","required_terms":[["index"],["位置","索引"]]},
-    {"id":"q13","category":"fact","query":"CIT-404 规定回答正文使用哪种编号对应参考资料？","relevant_source_ids":["d04"],"reference_answer":"使用 [1]、[2] 形式，按最终上下文顺序生成。","required_terms":[["[1]"],["顺序"]]},
-    {"id":"q14","category":"fact","query":"为什么 DOCX 的引用不能统一标成第一页？","relevant_source_ids":["d04"],"reference_answer":"DOCX 没有稳定排版页码时不能编造页码。","required_terms":[["稳定"],["不能","不可"]]},
-    {"id":"q15","category":"semantic","query":"怎样让刷新后的历史回答仍然能看到当轮使用的证据？","relevant_source_ids":["d04"],"reference_answer":"为每轮对话保留来源片段快照。","required_terms":[["每轮","各轮","当轮"],["快照"]]},
-    {"id":"q16","category":"semantic","query":"答案下面已经有来源卡，就能证明每句话都有依据了吗？","relevant_source_ids":["d04"],"reference_answer":"不能，来源卡只是检索依据，逐句支持还需核对。","required_terms":[["不能","不自动","不代表"],["每句","每一句","逐句"]]},
-    {"id":"q17","category":"fact","query":"IDX-505 中基础索引依赖哪些组件，是否要先完成实体抽取？","relevant_source_ids":["d05"],"reference_answer":"依赖 Embedding 与 Neo4j，不必等待实体抽取。","required_terms":[["Embedding"],["Neo4j"],["不必","不需要","无需"]]},
-    {"id":"q18","category":"fact","query":"再次编辑正文时，用于阻止旧结果写入的两个执行令牌叫什么？","relevant_source_ids":["d05"],"reference_answer":"index_run_token 与 run_token。","required_terms":[["index_run_token"],["run_token"]]},
-    {"id":"q19","category":"semantic","query":"新版本的向量计算失败后，原有可查询资料应该怎样处理？","relevant_source_ids":["d05"],"reference_answer":"保留旧集合；新向量完整计算成功后再原子替换。","required_terms":[["保留"],["旧"],["成功","完整"]]},
-    {"id":"q20","category":"semantic","query":"缩短文档后怎样避免仍搜到已经删掉的尾部内容？","relevant_source_ids":["d05"],"reference_answer":"成功后原子替换该来源的完整切片集合，而非只增量写入。","required_terms":[["替换"],["完整"],["来源"]]},
-    {"id":"q21","category":"fact","query":"EVAL-606 中 Recall@5 衡量什么？","relevant_source_ids":["d06"],"reference_answer":"前五项召回结果包含了多少相关文档。","required_terms":[["五","5"],["相关"],["文档"]]},
-    {"id":"q22","category":"fact","query":"首个相关结果的名次用什么指标衡量，整体位置质量又看什么？","relevant_source_ids":["d06"],"reference_answer":"首个相关结果看 MRR，排序位置质量看 nDCG。","required_terms":[["MRR"],["nDCG"]]},
-    {"id":"q23","category":"semantic","query":"跨两篇资料才能回答的问题，只找到其中一篇能算完整召回吗？","relevant_source_ids":["d06"],"reference_answer":"不能，必须检查全部必需来源。","required_terms":[["不能","不算"],["全部","所有"]]},
-    {"id":"q24","category":"semantic","query":"为什么不能把答案中的几个关键词命中当作完整的回答准确率？","relevant_source_ids":["d06"],"reference_answer":"还需要评估事实正确、证据支持和证据缺失时的拒答。","required_terms":[["事实","正确"],["证据"],["拒答"]]},
-    {"id":"q25","category":"fact","query":"SEC-707 规定会话越权读取应返回什么 HTTP 状态码？","relevant_source_ids":["d07"],"reference_answer":"403。","required_terms":[["403"]]},
-    {"id":"q26","category":"fact","query":"当前上传规范允许的单个文件上限是多少？","relevant_source_ids":["d07"],"reference_answer":"20MB。","required_terms":[["20"]]},
-    {"id":"q27","category":"semantic","query":"两个用户传了相同 md5 的资料，为什么还必须在检索时检查用户？","relevant_source_ids":["d07"],"reference_answer":"相同 md5 不能代替权限隔离，查询仍要带 user_id，防止跨用户读取。","required_terms":[["user_id"],["跨用户","隔离","串读"]]},
-    {"id":"q28","category":"semantic","query":"为了方便复现，能把模型密钥写到评测报告里吗？","relevant_source_ids":["d07"],"reference_answer":"不能，密钥保留在本机环境配置。","required_terms":[["不能","不可"],["环境","本机"]]},
-    {"id":"q29","category":"fact","query":"PARSE-808 当前用什么库读取 DOCX？","relevant_source_ids":["d08"],"reference_answer":"python-docx。","required_terms":[["python-docx"]]},
-    {"id":"q30","category":"fact","query":"当前 DOCX 解析要保留哪些正文结构，表格可以转为什么形式？","relevant_source_ids":["d08"],"reference_answer":"保留标题、中文段落和普通表格，表格可以转为 Markdown。","required_terms":[["标题"],["段落"],["表格"],["Markdown"]]},
-    {"id":"q31","category":"semantic","query":"扫描版 PDF 没有 OCR 时，可以当作已经读取到图片文字了吗？","relevant_source_ids":["d08"],"reference_answer":"不能，应报告解析缺失。","required_terms":[["不能","不可"],["缺失","未提取","无法"]]},
-    {"id":"q32","category":"semantic","query":"把同步 Word 解析放进 async 接口后，还需要怎样避免阻塞事件循环？","relevant_source_ids":["d08"],"reference_answer":"把同步解析放入工作线程。","required_terms":[["线程"]]},
-    {"id":"q33","category":"fact","query":"CHAT-909 当前把历史会话入口放在哪里？","relevant_source_ids":["d09"],"reference_answer":"AI 问答页的历史对话抽屉。","required_terms":[["问答"],["抽屉"]]},
-    {"id":"q34","category":"fact","query":"流式回答的连接断开后，页面要怎样处理？","relevant_source_ids":["d09"],"reference_answer":"展示错误并恢复输入。","required_terms":[["错误"],["恢复"]]},
-    {"id":"q35","category":"semantic","query":"在恢复聊天记录时，为什么不能复用上一条回答的来源列表？","relevant_source_ids":["d09"],"reference_answer":"每轮来源不同，必须分别恢复各轮快照，不能错配到下一轮。","required_terms":[["每轮","各轮"],["来源"],["快照"]]},
-    {"id":"q36","category":"semantic","query":"删除一段会话，只有前端弹出确认框就足够了吗？","relevant_source_ids":["d09"],"reference_answer":"不够，后台还要验证该会话属于当前用户。","required_terms":[["后台"],["用户","所有者"]]},
-    {"id":"q37","category":"fact","query":"SAFE-100 规定评测时为什么关闭外部搜索？","relevant_source_ids":["d10"],"reference_answer":"避免把网上知识当作本地证据。","required_terms":[["本地"],["证据"]]},
-    {"id":"q38","category":"fact","query":"给定资料没有记录某个数值时应怎样回答？","relevant_source_ids":["d10"],"reference_answer":"明确说明未提供或证据不足，不猜数值。","required_terms":[["未提供","不足","没有记录"],["不","不能"]]},
-    {"id":"q39","category":"semantic","query":"相似编号的旧草案能代替当前规范，来填补缺少的答案吗？","relevant_source_ids":["d10"],"reference_answer":"不能，归档草案不能代替现行依据。","required_terms":[["不能","不可"],["现行","当前"]]},
-    {"id":"q40","category":"semantic","query":"重排序给一个片段打了高分，是否意味着片段一定包含所问事实？","relevant_source_ids":["d10"],"reference_answer":"不是，高相关不保证包含问题所问的事实。","required_terms":[["不保证","不一定","不是","不意味着"],["事实"]]},
-    {"id":"q41","category":"fact","query":"PERF-111 当前评测默认并发和允许的最大并发分别是多少？","relevant_source_ids":["d11"],"reference_answer":"默认并发 2，最大 4。","required_terms":[["2"],["4"]]},
-    {"id":"q42","category":"fact","query":"性能报告要分别记录哪些阶段耗时以及哪些分位数？","relevant_source_ids":["d11"],"reference_answer":"检索、重排序、回答生成；P50 和 P95。","required_terms":[["检索"],["重排序"],["生成"],["P50"],["P95"]]},
-    {"id":"q43","category":"semantic","query":"P95 可以解释为百分之九十五的请求成功了吗？","relevant_source_ids":["d11"],"reference_answer":"不能，它表示 95% 的样本耗时不高于该值。","required_terms":[["不能","不是","不可以"],["耗时"]]},
-    {"id":"q44","category":"semantic","query":"索引和图谱改成两个 asyncio 循环，能据此说模型接口本身更快了吗？","relevant_source_ids":["d11"],"reference_answer":"不能；它避免阻塞下一份索引，但不意味着模型 API 变快。","required_terms":[["不能","不意味着"],["阻塞"],["模型","API"]]},
-    {"id":"q45","category":"fact","query":"CV-121 规定在简历中如何说明本项目的来源？","relevant_source_ids":["d12"],"reference_answer":"说明基于开源项目二次开发，并列出自己的改动。","required_terms":[["开源"],["二次开发"]]},
-    {"id":"q46","category":"fact","query":"可复现实验除了报告之外，还需要保存哪些材料？","relevant_source_ids":["d12"],"reference_answer":"固定题集、配置和失败记录。","required_terms":[["题集"],["配置"],["失败"]]},
-    {"id":"q47","category":"semantic","query":"只是调用了现成模型 API，可以写自己训练了基础模型或做了 LoRA 吗？","relevant_source_ids":["d12"],"reference_answer":"不能，模型 API 调用不等于训练或 LoRA 微调。","required_terms":[["不能","不等于"],["LoRA"]]},
-    {"id":"q48","category":"semantic","query":"尚未配置重排序服务，可不可以先写简历说准确率提高了百分之多少？","relevant_source_ids":["d12"],"reference_answer":"不能，没有实测对照不得宣称提升幅度。","required_terms":[["不能","不得","不可以"],["对照","实测"]]},
-    {"id":"q49","category":"multi_source","query":"结合当前混合检索和重排序规范，说明 RRF 的职责、每步候选数量和重排超时后的处理。","relevant_source_ids":["d02","d03"],"reference_answer":"RRF 融合排名；每步 20 个候选；重排超时保留原顺序。","required_terms":[["RRF"],["20"],["原","原始"],["顺序","排序"]]},
-    {"id":"q50","category":"multi_source","query":"结合解析与引用规范，DOCX 要保留哪些结构，为什么不能给它伪造页码？","relevant_source_ids":["d04","d08"],"reference_answer":"保留标题、段落与表格；DOCX 无稳定排版页码时不能编造页码。","required_terms":[["标题"],["段落"],["表格"],["稳定"],["页码"]]},
-    {"id":"q51","category":"multi_source","query":"结合索引和性能规范，慢图谱为什么不再挡住下一份文档索引，这能否证明模型接口加速？","relevant_source_ids":["d05","d11"],"reference_answer":"独立消费循环让基础索引不等待图谱；不能证明模型 API 更快。","required_terms":[["独立"],["不等待","不必等待","无需等待"],["不能","不意味着"]]},
-    {"id":"q52","category":"multi_source","query":"结合评测与简历规范，为什么只测几个关键词不足以支撑准确率提升的简历结论？","relevant_source_ids":["d06","d12"],"reference_answer":"关键词不是完整准确率；需检索与回答分层评估、实测对照并保存固定题集。","required_terms":[["检索"],["回答"],["对照"],["题集"]]},
-    {"id":"q53","category":"multi_source","query":"结合用户隔离和会话恢复规范，恢复聊天来源和删除聊天时分别要注意什么？","relevant_source_ids":["d07","d09"],"reference_answer":"恢复各轮来源快照，后台验证当前用户对会话的所有权；删除还需确认。","required_terms":[["快照"],["用户","所有者"],["确认"]]},
-    {"id":"q54","category":"multi_source","query":"结合重排序和证据不足规范，高分片段仍缺少问题所问事实时应该如何回答？","relevant_source_ids":["d03","d10"],"reference_answer":"重排序只判断相关性，高分不保证事实充分；应说明资料未提供或证据不足。","required_terms":[["相关"],["未提供","不足","没有记录"]]},
-    {"id":"q55","category":"unanswerable","query":"LRN-101 负责人沈若溪的电子邮箱是什么？只依据资料回答。","relevant_source_ids":[],"reference_answer":"资料没有提供电子邮箱。","required_terms":[]},
-    {"id":"q56","category":"unanswerable","query":"智学项目当前生产环境究竟有多少在线用户？只依据资料回答。","relevant_source_ids":[],"reference_answer":"资料未记录真实生产环境在线用户数。","required_terms":[]},
-    {"id":"q57","category":"unanswerable","query":"RANK-303 重排序服务今年实际花费了多少人民币？","relevant_source_ids":[],"reference_answer":"资料未提供实际采购或调用费用。","required_terms":[]},
-    {"id":"q58","category":"unanswerable","query":"接入重排序之后，真实独立测试的准确率到底提升了多少个百分点？","relevant_source_ids":[],"reference_answer":"没有实测对照数据，无法给出提升幅度。","required_terms":[]},
-    {"id":"q59","category":"unanswerable","query":"PERF-111 的实际线上 P95 是多少毫秒？不要解释定义，只给实测值。","relevant_source_ids":[],"reference_answer":"资料仅提供测量规范，没有实际线上 P95 数值。","required_terms":[]},
-    {"id":"q60","category":"unanswerable","query":"HYB-2048 当前负责人周予安的手机号码是多少？","relevant_source_ids":[],"reference_answer":"资料没有提供手机号码。","required_terms":[]}
+    {
+      "id": "q01",
+      "category": "fact",
+      "query": "现行 LRN-101 资料切片的负责人是谁？",
+      "relevant_source_ids": [
+        "d01"
+      ],
+      "reference_answer": "沈若溪。",
+      "required_terms": [
+        [
+          "沈若溪"
+        ]
+      ]
+    },
+    {
+      "id": "q02",
+      "category": "fact",
+      "query": "目前讲义每片的字符上限和相邻重叠分别是多少？",
+      "relevant_source_ids": [
+        "d01"
+      ],
+      "reference_answer": "每片 640 字符，重叠 80 字符。",
+      "required_terms": [
+        [
+          "640"
+        ],
+        [
+          "80"
+        ]
+      ]
+    },
+    {
+      "id": "q03",
+      "category": "semantic",
+      "query": "中文讲义怎样分段才能减少标题与正文失去联系？按当前规范回答。",
+      "relevant_source_ids": [
+        "d01"
+      ],
+      "reference_answer": "优先按标题和段落切分，并让切片保留标题。",
+      "required_terms": [
+        [
+          "标题"
+        ],
+        [
+          "段落"
+        ]
+      ]
+    },
+    {
+      "id": "q04",
+      "category": "semantic",
+      "query": "有人把现行切片长度单位写成 token，这样表述准确吗？",
+      "relevant_source_ids": [
+        "d01"
+      ],
+      "reference_answer": "不准确，规范使用字符数，不能说成 token 数。",
+      "required_terms": [
+        [
+          "字符"
+        ],
+        [
+          "不能",
+          "不准确",
+          "不是"
+        ]
+      ]
+    },
+    {
+      "id": "q05",
+      "category": "fact",
+      "query": "HYB-2048 现行混合检索试验由谁负责？",
+      "relevant_source_ids": [
+        "d02"
+      ],
+      "reference_answer": "周予安。",
+      "required_terms": [
+        [
+          "周予安"
+        ]
+      ]
+    },
+    {
+      "id": "q06",
+      "category": "fact",
+      "query": "当前用于融合两路检索排名的方法是什么，常数 k 是多少？",
+      "relevant_source_ids": [
+        "d02"
+      ],
+      "reference_answer": "RRF，k 为 60。",
+      "required_terms": [
+        [
+          "RRF"
+        ],
+        [
+          "60"
+        ]
+      ]
+    },
+    {
+      "id": "q07",
+      "category": "semantic",
+      "query": "为什么语义近似的问法和产品错误码不能只靠同一种召回？",
+      "relevant_source_ids": [
+        "d02"
+      ],
+      "reference_answer": "向量检索匹配语义，全文关键词检索补充错误码等精确词项。",
+      "required_terms": [
+        [
+          "语义"
+        ],
+        [
+          "关键词",
+          "全文"
+        ],
+        [
+          "精确"
+        ]
+      ]
+    },
+    {
+      "id": "q08",
+      "category": "semantic",
+      "query": "融合排名的分值可以直接显示成回答正确概率吗？",
+      "relevant_source_ids": [
+        "d02"
+      ],
+      "reference_answer": "不能，RRF 是排名融合分数，不能等同于答案正确概率。",
+      "required_terms": [
+        [
+          "不能",
+          "不等同",
+          "不是"
+        ],
+        [
+          "RRF",
+          "排名"
+        ]
+      ]
+    },
+    {
+      "id": "q09",
+      "category": "fact",
+      "query": "RANK-303 现行示例使用哪一个重排序模型？",
+      "relevant_source_ids": [
+        "d03"
+      ],
+      "reference_answer": "BAAI/bge-reranker-v2-m3。",
+      "required_terms": [
+        [
+          "bge-reranker-v2-m3"
+        ]
+      ]
+    },
+    {
+      "id": "q10",
+      "category": "fact",
+      "query": "现行相关性重排序每步候选、上下文数量与等待上限分别是多少？",
+      "relevant_source_ids": [
+        "d03"
+      ],
+      "reference_answer": "每步 20 个候选，最多 8 条本地上下文，最多等待 8 秒。",
+      "required_terms": [
+        [
+          "20"
+        ],
+        [
+          "8"
+        ]
+      ]
+    },
+    {
+      "id": "q11",
+      "category": "semantic",
+      "query": "如果排序供应商只给部分文档返回了分数，应怎样继续问答？",
+      "relevant_source_ids": [
+        "d03"
+      ],
+      "reference_answer": "按异常响应处理，保留原检索顺序，不能把部分评分当作完整结果。",
+      "required_terms": [
+        [
+          "原",
+          "原始"
+        ],
+        [
+          "顺序",
+          "排序"
+        ],
+        [
+          "完整",
+          "部分"
+        ]
+      ]
+    },
+    {
+      "id": "q12",
+      "category": "semantic",
+      "query": "两篇资料内容相近时，重排结果应靠哪个字段重新对应来源？",
+      "relevant_source_ids": [
+        "d03"
+      ],
+      "reference_answer": "根据服务返回的 index 映射输入文档位置。",
+      "required_terms": [
+        [
+          "index"
+        ],
+        [
+          "位置",
+          "索引"
+        ]
+      ]
+    },
+    {
+      "id": "q13",
+      "category": "fact",
+      "query": "CIT-404 规定回答正文使用哪种编号对应参考资料？",
+      "relevant_source_ids": [
+        "d04"
+      ],
+      "reference_answer": "使用 [1]、[2] 形式，按最终上下文顺序生成。",
+      "required_terms": [
+        [
+          "[1]"
+        ],
+        [
+          "顺序"
+        ]
+      ]
+    },
+    {
+      "id": "q14",
+      "category": "fact",
+      "query": "为什么 DOCX 的引用不能统一标成第一页？",
+      "relevant_source_ids": [
+        "d04"
+      ],
+      "reference_answer": "DOCX 没有稳定排版页码时不能编造页码。",
+      "required_terms": [
+        [
+          "稳定"
+        ],
+        [
+          "不能",
+          "不可"
+        ]
+      ]
+    },
+    {
+      "id": "q15",
+      "category": "semantic",
+      "query": "怎样让刷新后的历史回答仍然能看到当轮使用的证据？",
+      "relevant_source_ids": [
+        "d04"
+      ],
+      "reference_answer": "为每轮对话保留来源片段快照。",
+      "required_terms": [
+        [
+          "每轮",
+          "各轮",
+          "当轮"
+        ],
+        [
+          "快照"
+        ]
+      ]
+    },
+    {
+      "id": "q16",
+      "category": "semantic",
+      "query": "答案下面已经有来源卡，就能证明每句话都有依据了吗？",
+      "relevant_source_ids": [
+        "d04"
+      ],
+      "reference_answer": "不能，来源卡只是检索依据，逐句支持还需核对。",
+      "required_terms": [
+        [
+          "不能",
+          "不自动",
+          "不代表"
+        ],
+        [
+          "每句",
+          "每一句",
+          "逐句"
+        ]
+      ]
+    },
+    {
+      "id": "q17",
+      "category": "fact",
+      "query": "IDX-505 中基础索引依赖哪些组件，是否要先完成实体抽取？",
+      "relevant_source_ids": [
+        "d05"
+      ],
+      "reference_answer": "依赖 Embedding 与 Neo4j，不必等待实体抽取。",
+      "required_terms": [
+        [
+          "Embedding"
+        ],
+        [
+          "Neo4j"
+        ],
+        [
+          "不必",
+          "不需要",
+          "无需"
+        ]
+      ]
+    },
+    {
+      "id": "q18",
+      "category": "fact",
+      "query": "再次编辑正文时，用于阻止旧结果写入的两个执行令牌叫什么？",
+      "relevant_source_ids": [
+        "d05"
+      ],
+      "reference_answer": "index_run_token 与 run_token。",
+      "required_terms": [
+        [
+          "index_run_token"
+        ],
+        [
+          "run_token"
+        ]
+      ]
+    },
+    {
+      "id": "q19",
+      "category": "semantic",
+      "query": "新版本的向量计算失败后，原有可查询资料应该怎样处理？",
+      "relevant_source_ids": [
+        "d05"
+      ],
+      "reference_answer": "保留旧集合；新向量完整计算成功后再原子替换。",
+      "required_terms": [
+        [
+          "保留"
+        ],
+        [
+          "旧"
+        ],
+        [
+          "成功",
+          "完整"
+        ]
+      ]
+    },
+    {
+      "id": "q20",
+      "category": "semantic",
+      "query": "缩短文档后怎样避免仍搜到已经删掉的尾部内容？",
+      "relevant_source_ids": [
+        "d05"
+      ],
+      "reference_answer": "成功后原子替换该来源的完整切片集合，而非只增量写入。",
+      "required_terms": [
+        [
+          "替换"
+        ],
+        [
+          "完整"
+        ],
+        [
+          "来源"
+        ]
+      ]
+    },
+    {
+      "id": "q21",
+      "category": "fact",
+      "query": "EVAL-606 中 Recall@5 衡量什么？",
+      "relevant_source_ids": [
+        "d06"
+      ],
+      "reference_answer": "前五项召回结果包含了多少相关文档。",
+      "required_terms": [
+        [
+          "五",
+          "5"
+        ],
+        [
+          "相关"
+        ],
+        [
+          "文档"
+        ]
+      ]
+    },
+    {
+      "id": "q22",
+      "category": "fact",
+      "query": "首个相关结果的名次用什么指标衡量，整体位置质量又看什么？",
+      "relevant_source_ids": [
+        "d06"
+      ],
+      "reference_answer": "首个相关结果看 MRR，排序位置质量看 nDCG。",
+      "required_terms": [
+        [
+          "MRR"
+        ],
+        [
+          "nDCG"
+        ]
+      ]
+    },
+    {
+      "id": "q23",
+      "category": "semantic",
+      "query": "跨两篇资料才能回答的问题，只找到其中一篇能算完整召回吗？",
+      "relevant_source_ids": [
+        "d06"
+      ],
+      "reference_answer": "不能，必须检查全部必需来源。",
+      "required_terms": [
+        [
+          "不能",
+          "不算"
+        ],
+        [
+          "全部",
+          "所有"
+        ]
+      ]
+    },
+    {
+      "id": "q24",
+      "category": "semantic",
+      "query": "为什么不能把答案中的几个关键词命中当作完整的回答准确率？",
+      "relevant_source_ids": [
+        "d06"
+      ],
+      "reference_answer": "还需要评估事实正确、证据支持和证据缺失时的拒答。",
+      "required_terms": [
+        [
+          "事实",
+          "正确"
+        ],
+        [
+          "证据"
+        ],
+        [
+          "拒答"
+        ]
+      ]
+    },
+    {
+      "id": "q25",
+      "category": "fact",
+      "query": "SEC-707 规定会话越权读取应返回什么 HTTP 状态码？",
+      "relevant_source_ids": [
+        "d07"
+      ],
+      "reference_answer": "403。",
+      "required_terms": [
+        [
+          "403"
+        ]
+      ]
+    },
+    {
+      "id": "q26",
+      "category": "fact",
+      "query": "当前上传规范允许的单个文件上限是多少？",
+      "relevant_source_ids": [
+        "d07"
+      ],
+      "reference_answer": "20MB。",
+      "required_terms": [
+        [
+          "20"
+        ]
+      ]
+    },
+    {
+      "id": "q27",
+      "category": "semantic",
+      "query": "两个用户传了相同 md5 的资料，为什么还必须在检索时检查用户？",
+      "relevant_source_ids": [
+        "d07"
+      ],
+      "reference_answer": "相同 md5 不能代替权限隔离，查询仍要带 user_id，防止跨用户读取。",
+      "required_terms": [
+        [
+          "user_id"
+        ],
+        [
+          "跨用户",
+          "隔离",
+          "串读"
+        ]
+      ]
+    },
+    {
+      "id": "q28",
+      "category": "semantic",
+      "query": "为了方便复现，能把模型密钥写到评测报告里吗？",
+      "relevant_source_ids": [
+        "d07"
+      ],
+      "reference_answer": "不能，密钥保留在本机环境配置。",
+      "required_terms": [
+        [
+          "不能",
+          "不可"
+        ],
+        [
+          "环境",
+          "本机"
+        ]
+      ]
+    },
+    {
+      "id": "q29",
+      "category": "fact",
+      "query": "PARSE-808 当前用什么库读取 DOCX？",
+      "relevant_source_ids": [
+        "d08"
+      ],
+      "reference_answer": "python-docx。",
+      "required_terms": [
+        [
+          "python-docx"
+        ]
+      ]
+    },
+    {
+      "id": "q30",
+      "category": "fact",
+      "query": "当前 DOCX 解析要保留哪些正文结构，表格可以转为什么形式？",
+      "relevant_source_ids": [
+        "d08"
+      ],
+      "reference_answer": "保留标题、中文段落和普通表格，表格可以转为 Markdown。",
+      "required_terms": [
+        [
+          "标题"
+        ],
+        [
+          "段落"
+        ],
+        [
+          "表格"
+        ],
+        [
+          "Markdown"
+        ]
+      ]
+    },
+    {
+      "id": "q31",
+      "category": "semantic",
+      "query": "扫描版 PDF 没有 OCR 时，可以当作已经读取到图片文字了吗？",
+      "relevant_source_ids": [
+        "d08"
+      ],
+      "reference_answer": "不能，应报告解析缺失。",
+      "required_terms": [
+        [
+          "不能",
+          "不可"
+        ],
+        [
+          "缺失",
+          "未提取",
+          "无法"
+        ]
+      ]
+    },
+    {
+      "id": "q32",
+      "category": "semantic",
+      "query": "把同步 Word 解析放进 async 接口后，还需要怎样避免阻塞事件循环？",
+      "relevant_source_ids": [
+        "d08"
+      ],
+      "reference_answer": "把同步解析放入工作线程。",
+      "required_terms": [
+        [
+          "线程"
+        ]
+      ]
+    },
+    {
+      "id": "q33",
+      "category": "fact",
+      "query": "CHAT-909 当前把历史会话入口放在哪里？",
+      "relevant_source_ids": [
+        "d09"
+      ],
+      "reference_answer": "AI 问答页的历史对话抽屉。",
+      "required_terms": [
+        [
+          "问答"
+        ],
+        [
+          "抽屉"
+        ]
+      ]
+    },
+    {
+      "id": "q34",
+      "category": "fact",
+      "query": "流式回答的连接断开后，页面要怎样处理？",
+      "relevant_source_ids": [
+        "d09"
+      ],
+      "reference_answer": "展示错误并恢复输入。",
+      "required_terms": [
+        [
+          "错误"
+        ],
+        [
+          "恢复"
+        ]
+      ]
+    },
+    {
+      "id": "q35",
+      "category": "semantic",
+      "query": "在恢复聊天记录时，为什么不能复用上一条回答的来源列表？",
+      "relevant_source_ids": [
+        "d09"
+      ],
+      "reference_answer": "每轮来源不同，必须分别恢复各轮快照，不能错配到下一轮。",
+      "required_terms": [
+        [
+          "每轮",
+          "各轮"
+        ],
+        [
+          "来源"
+        ],
+        [
+          "快照"
+        ]
+      ]
+    },
+    {
+      "id": "q36",
+      "category": "semantic",
+      "query": "删除一段会话，只有前端弹出确认框就足够了吗？",
+      "relevant_source_ids": [
+        "d09"
+      ],
+      "reference_answer": "不够，后台还要验证该会话属于当前用户。",
+      "required_terms": [
+        [
+          "后台"
+        ],
+        [
+          "用户",
+          "所有者"
+        ]
+      ]
+    },
+    {
+      "id": "q37",
+      "category": "fact",
+      "query": "SAFE-100 规定评测时为什么关闭外部搜索？",
+      "relevant_source_ids": [
+        "d10"
+      ],
+      "reference_answer": "避免把网上知识当作本地证据。",
+      "required_terms": [
+        [
+          "本地"
+        ],
+        [
+          "证据"
+        ]
+      ]
+    },
+    {
+      "id": "q38",
+      "category": "fact",
+      "query": "给定资料没有记录某个数值时应怎样回答？",
+      "relevant_source_ids": [
+        "d10"
+      ],
+      "reference_answer": "明确说明未提供或证据不足，不猜数值。",
+      "required_terms": [
+        [
+          "未提供",
+          "不足",
+          "没有记录"
+        ],
+        [
+          "不",
+          "不能"
+        ]
+      ]
+    },
+    {
+      "id": "q39",
+      "category": "semantic",
+      "query": "相似编号的旧草案能代替当前规范，来填补缺少的答案吗？",
+      "relevant_source_ids": [
+        "d10"
+      ],
+      "reference_answer": "不能，归档草案不能代替现行依据。",
+      "required_terms": [
+        [
+          "不能",
+          "不可"
+        ],
+        [
+          "现行",
+          "当前"
+        ]
+      ]
+    },
+    {
+      "id": "q40",
+      "category": "semantic",
+      "query": "重排序给一个片段打了高分，是否意味着片段一定包含所问事实？",
+      "relevant_source_ids": [
+        "d10"
+      ],
+      "reference_answer": "不是，高相关不保证包含问题所问的事实。",
+      "required_terms": [
+        [
+          "不保证",
+          "不一定",
+          "不是",
+          "不意味着"
+        ],
+        [
+          "事实"
+        ]
+      ]
+    },
+    {
+      "id": "q41",
+      "category": "fact",
+      "query": "PERF-111 当前评测默认并发和允许的最大并发分别是多少？",
+      "relevant_source_ids": [
+        "d11"
+      ],
+      "reference_answer": "默认并发 2，最大 4。",
+      "required_terms": [
+        [
+          "2"
+        ],
+        [
+          "4"
+        ]
+      ]
+    },
+    {
+      "id": "q42",
+      "category": "fact",
+      "query": "性能报告要分别记录哪些阶段耗时以及哪些分位数？",
+      "relevant_source_ids": [
+        "d11"
+      ],
+      "reference_answer": "检索、重排序、回答生成；P50 和 P95。",
+      "required_terms": [
+        [
+          "检索"
+        ],
+        [
+          "重排序"
+        ],
+        [
+          "生成"
+        ],
+        [
+          "P50"
+        ],
+        [
+          "P95"
+        ]
+      ]
+    },
+    {
+      "id": "q43",
+      "category": "semantic",
+      "query": "P95 可以解释为百分之九十五的请求成功了吗？",
+      "relevant_source_ids": [
+        "d11"
+      ],
+      "reference_answer": "不能，它表示 95% 的样本耗时不高于该值。",
+      "required_terms": [
+        [
+          "不能",
+          "不是",
+          "不可以"
+        ],
+        [
+          "耗时"
+        ]
+      ]
+    },
+    {
+      "id": "q44",
+      "category": "semantic",
+      "query": "索引和图谱改成两个 asyncio 循环，能据此说模型接口本身更快了吗？",
+      "relevant_source_ids": [
+        "d11"
+      ],
+      "reference_answer": "不能；它避免阻塞下一份索引，但不意味着模型 API 变快。",
+      "required_terms": [
+        [
+          "不能",
+          "不意味着"
+        ],
+        [
+          "阻塞"
+        ],
+        [
+          "模型",
+          "API"
+        ]
+      ]
+    },
+    {
+      "id": "q45",
+      "category": "fact",
+      "query": "LB-121 要求借阅登记哪些信息？",
+      "relevant_source_ids": [
+        "d12"
+      ],
+      "reference_answer": "登记姓名、资料编号和归还日期。",
+      "required_terms": [
+        [
+          "姓名"
+        ],
+        [
+          "资料编号"
+        ],
+        [
+          "归还日期"
+        ]
+      ]
+    },
+    {
+      "id": "q46",
+      "category": "fact",
+      "query": "现行 LB-121 每次最多借阅几份资料，默认借期多久？",
+      "relevant_source_ids": [
+        "d12"
+      ],
+      "reference_answer": "每次最多3份，默认7天。",
+      "required_terms": [
+        [
+          "3"
+        ],
+        [
+          "7"
+        ]
+      ]
+    },
+    {
+      "id": "q47",
+      "category": "semantic",
+      "query": "还没有完成登记，能直接取走纸质资料吗？只依据借阅规范回答。",
+      "relevant_source_ids": [
+        "d12"
+      ],
+      "reference_answer": "不能，取走纸质资料前必须完成登记。",
+      "required_terms": [
+        [
+          "不能",
+          "不可以"
+        ],
+        [
+          "登记"
+        ]
+      ]
+    },
+    {
+      "id": "q48",
+      "category": "semantic",
+      "query": "纸质资料和电子讲义一样，可以只远程登记就算归还吗？",
+      "relevant_source_ids": [
+        "d12"
+      ],
+      "reference_answer": "不能，纸质资料必须到管理台归还；电子讲义可以远程登记。",
+      "required_terms": [
+        [
+          "不能",
+          "不可以"
+        ],
+        [
+          "管理台"
+        ]
+      ]
+    },
+    {
+      "id": "q49",
+      "category": "multi_source",
+      "query": "结合当前混合检索和重排序规范，说明 RRF 的职责、每步候选数量和重排超时后的处理。",
+      "relevant_source_ids": [
+        "d02",
+        "d03"
+      ],
+      "reference_answer": "RRF 融合排名；每步 20 个候选；重排超时保留原顺序。",
+      "required_terms": [
+        [
+          "RRF"
+        ],
+        [
+          "20"
+        ],
+        [
+          "原",
+          "原始"
+        ],
+        [
+          "顺序",
+          "排序"
+        ]
+      ]
+    },
+    {
+      "id": "q50",
+      "category": "multi_source",
+      "query": "结合解析与引用规范，DOCX 要保留哪些结构，为什么不能给它伪造页码？",
+      "relevant_source_ids": [
+        "d04",
+        "d08"
+      ],
+      "reference_answer": "保留标题、段落与表格；DOCX 无稳定排版页码时不能编造页码。",
+      "required_terms": [
+        [
+          "标题"
+        ],
+        [
+          "段落"
+        ],
+        [
+          "表格"
+        ],
+        [
+          "稳定"
+        ],
+        [
+          "页码"
+        ]
+      ]
+    },
+    {
+      "id": "q51",
+      "category": "multi_source",
+      "query": "结合索引和性能规范，慢图谱为什么不再挡住下一份文档索引，这能否证明模型接口加速？",
+      "relevant_source_ids": [
+        "d05",
+        "d11"
+      ],
+      "reference_answer": "独立消费循环让基础索引不等待图谱；不能证明模型 API 更快。",
+      "required_terms": [
+        [
+          "独立"
+        ],
+        [
+          "不等待",
+          "不必等待",
+          "无需等待"
+        ],
+        [
+          "不能",
+          "不意味着"
+        ]
+      ]
+    },
+    {
+      "id": "q52",
+      "category": "multi_source",
+      "query": "分别说明评估备忘录要求区分哪两个评估层面，以及借阅规范要求登记哪些信息。",
+      "relevant_source_ids": [
+        "d06",
+        "d12"
+      ],
+      "reference_answer": "评估区分检索与回答；借阅登记姓名、资料编号和归还日期。",
+      "required_terms": [
+        [
+          "检索"
+        ],
+        [
+          "回答"
+        ],
+        [
+          "姓名"
+        ],
+        [
+          "资料编号"
+        ],
+        [
+          "归还日期"
+        ]
+      ]
+    },
+    {
+      "id": "q53",
+      "category": "multi_source",
+      "query": "结合用户隔离和会话恢复规范，恢复聊天来源和删除聊天时分别要注意什么？",
+      "relevant_source_ids": [
+        "d07",
+        "d09"
+      ],
+      "reference_answer": "恢复各轮来源快照，后台验证当前用户对会话的所有权；删除还需确认。",
+      "required_terms": [
+        [
+          "快照"
+        ],
+        [
+          "用户",
+          "所有者"
+        ],
+        [
+          "确认"
+        ]
+      ]
+    },
+    {
+      "id": "q54",
+      "category": "multi_source",
+      "query": "结合重排序和证据不足规范，高分片段仍缺少问题所问事实时应该如何回答？",
+      "relevant_source_ids": [
+        "d03",
+        "d10"
+      ],
+      "reference_answer": "重排序只判断相关性，高分不保证事实充分；应说明资料未提供或证据不足。",
+      "required_terms": [
+        [
+          "相关"
+        ],
+        [
+          "未提供",
+          "不足",
+          "没有记录"
+        ]
+      ]
+    },
+    {
+      "id": "q55",
+      "category": "unanswerable",
+      "query": "LRN-101 负责人沈若溪的电子邮箱是什么？只依据资料回答。",
+      "relevant_source_ids": [],
+      "reference_answer": "资料没有提供电子邮箱。",
+      "required_terms": []
+    },
+    {
+      "id": "q56",
+      "category": "unanswerable",
+      "query": "智学项目当前生产环境究竟有多少在线用户？只依据资料回答。",
+      "relevant_source_ids": [],
+      "reference_answer": "资料未记录真实生产环境在线用户数。",
+      "required_terms": []
+    },
+    {
+      "id": "q57",
+      "category": "unanswerable",
+      "query": "RANK-303 重排序服务今年实际花费了多少人民币？",
+      "relevant_source_ids": [],
+      "reference_answer": "资料未提供实际采购或调用费用。",
+      "required_terms": []
+    },
+    {
+      "id": "q58",
+      "category": "unanswerable",
+      "query": "接入重排序之后，真实独立测试的准确率到底提升了多少个百分点？",
+      "relevant_source_ids": [],
+      "reference_answer": "没有实测对照数据，无法给出提升幅度。",
+      "required_terms": []
+    },
+    {
+      "id": "q59",
+      "category": "unanswerable",
+      "query": "PERF-111 的实际线上 P95 是多少毫秒？不要解释定义，只给实测值。",
+      "relevant_source_ids": [],
+      "reference_answer": "资料仅提供测量规范，没有实际线上 P95 数值。",
+      "required_terms": []
+    },
+    {
+      "id": "q60",
+      "category": "unanswerable",
+      "query": "HYB-2048 当前负责人周予安的手机号码是多少？",
+      "relevant_source_ids": [],
+      "reference_answer": "资料没有提供手机号码。",
+      "required_terms": []
+    }
   ]
 }

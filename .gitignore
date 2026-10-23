@@ -38,6 +38,11 @@ dist/
 /output/
 /tmp/
 /LOCAL_SETUP.md
+# Local experiment reports and private notes
+/docs/*-20*/
+/docs/acceptance*.json
+/backend/evaluation/local/
+/local-notes/
 *.log
 *.db
 *.sqlite3

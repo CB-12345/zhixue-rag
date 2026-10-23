@@ -20,4 +20,4 @@ npm run lint
 npm run build
 ```
 
-Docker 构建会执行相同检查，生成的静态文件由 Nginx 托管。整套应用的启动及模型配置见[项目 README](../README.md)。
+Docker 构建执行生产构建，生成的静态文件由 Nginx 托管；lint 由开发命令和 CI 单独检查。整套应用的启动及模型配置见[项目 README](../README.md)。

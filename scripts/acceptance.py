@@ -1,6 +1,6 @@
 """本机真实 API 验收：只用 Python 标准库，不读取模型密钥。
 
-python scripts/acceptance.py --seed --output docs/acceptance-latest.json
+python scripts/acceptance.py --seed --output backend/data/evaluation/acceptance-latest.json
 密码从 RAGNOTEBOOK_PASSWORD 环境变量或交互输入读取。会创建演示资料和验收会话。
 """
 import argparse
@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--base-url", default="http://127.0.0.1:3000")
     parser.add_argument("--username", default="admin")
     parser.add_argument("--seed", action="store_true")
-    parser.add_argument("--output", default="docs/acceptance-latest.json")
+    parser.add_argument("--output", default="backend/data/evaluation/acceptance-latest.json")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     base = args.base_url.rstrip("/")

@@ -1,0 +1,670 @@
+{
+  "version": "answerability-reference-fixtures-v1",
+  "description": "自编的引用身份、歧义和跨文档边界样例。",
+  "cases": [
+    {
+      "query": "依据示例资料说明 count()、nunique() 和 value_counts() 的区别。",
+      "decision": {
+        "answerable": true,
+        "confidence": 0.9,
+        "reason": "示例包含方法说明。",
+        "web_queries": [],
+        "supporting_quotes": [
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| value_counts() | 每个值的出现次数 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| count() | 非缺失值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| nunique() | 唯一值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# count() 统计非缺失值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# nunique() 统计唯一值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# value_counts() 统计每个值的出现次数"
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "id": "doc:demo-dataframe:0",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "| 方法 | 含义 |\n| --- | --- |\n| count() | 非缺失值数量 |\n| nunique() | 唯一值数量 |\n| value_counts() | 每个值的出现次数 |",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 0
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:1",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# nunique() 统计唯一值\n# value_counts() 统计每个值的出现次数",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 1
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:2",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# count() 统计非缺失值",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 2
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:3",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于索引的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 3
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:4",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于排序的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 4
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:5",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于切片的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 5
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:6",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于列名的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 6
+          }
+        }
+      ],
+      "expected_answerable": true,
+      "id": "a01-same-document-reference"
+    },
+    {
+      "query": "依据示例资料说明 count()、nunique() 和 value_counts() 的区别。",
+      "decision": {
+        "answerable": true,
+        "confidence": 0.9,
+        "reason": "示例包含方法说明。",
+        "web_queries": [],
+        "supporting_quotes": [
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| value_counts() | 每个值的出现次数 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| count() | 非缺失值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| nunique() | 唯一值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# count() 统计全部元素"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# nunique() 统计唯一值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# value_counts() 统计每个值的出现次数"
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "id": "doc:demo-dataframe:0",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "| 方法 | 含义 |\n| --- | --- |\n| count() | 非缺失值数量 |\n| nunique() | 唯一值数量 |\n| value_counts() | 每个值的出现次数 |",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 0
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:1",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# nunique() 统计唯一值\n# value_counts() 统计每个值的出现次数",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 1
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:2",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# count() 统计非缺失值",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 2
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:3",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于索引的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 3
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:4",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于排序的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 4
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:5",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于切片的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 5
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:6",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于列名的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 6
+          }
+        }
+      ],
+      "expected_answerable": false,
+      "id": "a02-fabricated-quote"
+    },
+    {
+      "query": "依据示例资料说明 count()、nunique() 和 value_counts() 的区别。",
+      "decision": {
+        "answerable": true,
+        "confidence": 0.9,
+        "reason": "示例包含方法说明。",
+        "web_queries": [],
+        "supporting_quotes": [
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| value_counts() | 每个值的出现次数 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| count() | 非缺失值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| nunique() | 唯一值数量 |"
+          },
+          {
+            "evidence_id": "unknown-chunk",
+            "quote": "# count() 统计非缺失值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# nunique() 统计唯一值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# value_counts() 统计每个值的出现次数"
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "id": "doc:demo-dataframe:0",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "| 方法 | 含义 |\n| --- | --- |\n| count() | 非缺失值数量 |\n| nunique() | 唯一值数量 |\n| value_counts() | 每个值的出现次数 |",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 0
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:1",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# nunique() 统计唯一值\n# value_counts() 统计每个值的出现次数",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 1
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:2",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# count() 统计非缺失值",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 2
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:3",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于索引的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 3
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:4",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于排序的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 4
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:5",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于切片的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 5
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:6",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于列名的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 6
+          }
+        }
+      ],
+      "expected_answerable": false,
+      "id": "a03-unknown-id"
+    },
+    {
+      "query": "依据示例资料说明 count()、nunique() 和 value_counts() 的区别。",
+      "decision": {
+        "answerable": true,
+        "confidence": 0.9,
+        "reason": "示例包含方法说明。",
+        "web_queries": [],
+        "supporting_quotes": [
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| value_counts() | 每个值的出现次数 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| count() | 非缺失值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| nunique() | 唯一值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# count() 统计非缺失值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# nunique() 统计唯一值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# value_counts() 统计每个值的出现次数"
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "id": "doc:demo-dataframe:0",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "| 方法 | 含义 |\n| --- | --- |\n| count() | 非缺失值数量 |\n| nunique() | 唯一值数量 |\n| value_counts() | 每个值的出现次数 |",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 0
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:1",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# nunique() 统计唯一值\n# value_counts() 统计每个值的出现次数",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 1
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:2",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# count() 统计非缺失值",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 2
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:3",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于索引的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 3
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:4",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于排序的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 4
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:5",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于切片的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 5
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:6",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于列名的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 6
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:7",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# count() 统计非缺失值",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 2
+          }
+        }
+      ],
+      "expected_answerable": false,
+      "id": "a04-ambiguous-reference"
+    },
+    {
+      "query": "依据示例资料说明 count()、nunique() 和 value_counts() 的区别。",
+      "decision": {
+        "answerable": true,
+        "confidence": 0.9,
+        "reason": "示例包含方法说明。",
+        "web_queries": [],
+        "supporting_quotes": [
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| value_counts() | 每个值的出现次数 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| count() | 非缺失值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| nunique() | 唯一值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# count() 统计非缺失值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# nunique() 统计唯一值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# value_counts() 统计每个值的出现次数"
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "id": "doc:demo-dataframe:0",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "| 方法 | 含义 |\n| --- | --- |\n| count() | 非缺失值数量 |\n| nunique() | 唯一值数量 |\n| value_counts() | 每个值的出现次数 |",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 0
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:1",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# nunique() 统计唯一值\n# value_counts() 统计每个值的出现次数",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 1
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:2",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# count() 统计非缺失值",
+          "metadata": {
+            "source_id": "another-document",
+            "chunk_index": 2
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:3",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于索引的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 3
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:4",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于排序的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 4
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:5",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于切片的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 5
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:6",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于列名的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 6
+          }
+        }
+      ],
+      "expected_answerable": false,
+      "id": "a05-cross-document"
+    },
+    {
+      "query": "依据示例资料说明 count()、nunique() 和 value_counts() 的区别。",
+      "decision": {
+        "answerable": true,
+        "confidence": 0.9,
+        "reason": "示例包含方法说明。",
+        "web_queries": [],
+        "supporting_quotes": [
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| value_counts() | 每个值的出现次数 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| count() | 非缺失值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:0",
+            "quote": "| nunique() | 唯一值数量 |"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:2",
+            "quote": "# count() 统计非缺失值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# nunique() 统计唯一值"
+          },
+          {
+            "evidence_id": "doc:demo-dataframe:1",
+            "quote": "# value_counts() 统计每个值的出现次数"
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "id": "doc:demo-dataframe:0",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "| 方法 | 含义 |\n| --- | --- |\n| count() | 非缺失值数量 |\n| nunique() | 唯一值数量 |\n| value_counts() | 每个值的出现次数 |",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 0
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:1",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# nunique() 统计唯一值\n# value_counts() 统计每个值的出现次数",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 1
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:2",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "# count() 统计非缺失值",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 2
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:3",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于索引的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 3
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:4",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于排序的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 4
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:5",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于切片的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 5
+          }
+        },
+        {
+          "id": "doc:demo-dataframe:6",
+          "source": "knowledge_base",
+          "title": "DataFrame 示例文档",
+          "content": "关于列名的示例",
+          "metadata": {
+            "source_id": "demo-dataframe",
+            "chunk_index": 6
+          }
+        }
+      ],
+      "expected_answerable": true,
+      "id": "a06-correct-ids"
+    }
+  ]
+}

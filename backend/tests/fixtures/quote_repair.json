@@ -1,0 +1,464 @@
+{
+  "version": "quote-repair-fixtures-v1",
+  "description": "精简的引用修复回归样例，仅保留检查所需的正文片段。",
+  "cases": [
+    {
+      "id": "q01-quote-statistics",
+      "query": "依据示例资料核对方法、参数和引用。",
+      "draft": "这三个方法统计的内容不同：\n\n- **count()**：统计非缺失值（非空）元素的个数，返回一个数量值 [1][3]。\n- **nunique()**：统计去重后非缺失值元素的个数，返回一个数量值 [1][2][3]。\n- **value_counts()**：统计每个元素（每个唯一值）出现的次数，返回的是按值计数的结果，而不是一个总数 [1][2][3]。\n\n简言之，`count()` 只判断是否非空，`nunique()` 在非空的基础上再去重，`value_counts()` 则给出每个不同取值各出现多少次 [1][3]。资料中未说明 `value_counts()` 对缺失值的处理方式。",
+      "captured_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": true,
+            "quotes": []
+          },
+          {
+            "index": 1,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "| 频率统计 | count() | 非缺失值数量 | s.count() |"
+              },
+              {
+                "number": 3,
+                "quote": "# count()   非缺失值元素的个数"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "| 频率统计 | nunique() | 唯一值个数（去重） | s.nunique() |"
+              },
+              {
+                "number": 2,
+                "quote": "# nunique() 去重后非缺失值元素元素个数"
+              },
+              {
+                "number": 3,
+                "quote": "# nunique() 去重后非缺失值元素元素个数"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "| 频率统计 | value_counts() | 每个唯一值的出现次数 | s.value_counts() |"
+              },
+              {
+                "number": 2,
+                "quote": "# value_counts()    每个元素的个数"
+              },
+              {
+                "number": 3,
+                "quote": "# value_counts()    每个元素的个数"
+              }
+            ]
+          },
+          {
+            "index": 4,
+            "keep": false,
+            "quotes": []
+          }
+        ]
+      },
+      "corrected_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": true,
+            "quotes": []
+          },
+          {
+            "index": 1,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "| 频率统计 | count() | 非缺失值数量 | s.count() |"
+              },
+              {
+                "number": 3,
+                "quote": "# count()   非缺失值元素的个数"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "| 频率统计 | nunique() | 唯一值个数（去重） | s.nunique() |"
+              },
+              {
+                "number": 2,
+                "quote": "# nunique() 去重后非缺失值元素元素个数"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "| 频率统计 | value_counts() | 每个唯一值的出现次数 | s.value_counts() |"
+              },
+              {
+                "number": 2,
+                "quote": "# value_counts()    每个元素的个数"
+              }
+            ]
+          },
+          {
+            "index": 4,
+            "keep": false,
+            "quotes": []
+          }
+        ]
+      },
+      "expected_statuses": [
+        "filtered"
+      ],
+      "required_terms": [
+        "count()",
+        "nunique()",
+        "value_counts()",
+        "非缺失值"
+      ],
+      "forbidden_terms": [],
+      "sources": [
+        {
+          "number": 1,
+          "title": "示例资料 1",
+          "content": "| 频率统计 | count() | 非缺失值数量 | s.count() |\n| 频率统计 | nunique() | 唯一值个数（去重） | s.nunique() |\n| 频率统计 | value_counts() | 每个唯一值的出现次数 | s.value_counts() |"
+        },
+        {
+          "number": 2,
+          "title": "示例资料 2",
+          "content": "# nunique() 去重后非缺失值元素元素个数\n# value_counts()    每个元素的个数"
+        },
+        {
+          "number": 3,
+          "title": "示例资料 3",
+          "content": "# count()   非缺失值元素的个数"
+        },
+        {
+          "number": 4,
+          "title": "示例资料 4",
+          "content": "本片段为无关的测试资料。"
+        },
+        {
+          "number": 5,
+          "title": "示例资料 5",
+          "content": "本片段为无关的测试资料。"
+        },
+        {
+          "number": 6,
+          "title": "示例资料 6",
+          "content": "本片段为无关的测试资料。"
+        },
+        {
+          "number": 7,
+          "title": "示例资料 7",
+          "content": "本片段为无关的测试资料。"
+        }
+      ]
+    },
+    {
+      "id": "q02-quote-hyde",
+      "query": "依据示例资料核对方法、参数和引用。",
+      "draft": "**MQE 生成什么**：MQE 通过 LLM 生成语义等价但表述不同的多个查询，从多个角度理解用户意图，用来提高召回率 [1]；具体是生成“语义等价或互补的多样化查询” [2]。例如“如何学习Python”可扩展为“Python入门教程”“Python学习方法”“Python编程指南”等 [3]。\n\n**HyDE 生成什么**：HyDE 让 LLM 先生成一个假设性的答案段落，再以该答案段落作为查询去检索真实文档 [2]；实现中的提示词要求直接写“一段中等长度、客观、包含关键术语的段落”，作为向量检索用的查询文档 [4]。其目的是用假设答案的向量来弥合查询与文档之间的语义鸿沟 [1]。",
+      "captured_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "MQE通过LLM生成语义等价但表述不同的查询，从多个角度理解用户意图，提升召回率30%-50%。"
+              },
+              {
+                "number": 2,
+                "quote": "生成语义等价或互补的多样化查询。"
+              },
+              {
+                "number": 3,
+                "quote": "\"如何学习Python\"可以扩展为\"Python入门教程\"、\"Python学习方法\"、\"Python编程指南\"等多个查询。"
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 2,
+                "quote": "HyDE通过让LLM先生成一个假设性的答案段落，然后用这个答案段落去检索真实文档。"
+              },
+              {
+                "number": 4,
+                "quote": "请直接写一段中等长度、客观、包含关键术语的段落。"
+              },
+              {
+                "number": 1,
+                "quote": "生成假设答案文档，桥接查询和文档的语义鸿沟"
+              }
+            ]
+          }
+        ]
+      },
+      "corrected_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "MQE通过LLM生成语义等价但表述不同的查询，从多个角度理解用户意图，提升召回率30%-50%。"
+              },
+              {
+                "number": 2,
+                "quote": "生成语义等价或互补的多样化查询。"
+              },
+              {
+                "number": 3,
+                "quote": "\"如何学习Python\"可以扩展为\"Python入门教程\"、\"Python学习方法\"、\"Python编程指南\"等多个查询。"
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 2,
+                "quote": "HyDE通过让LLM先生成一个假设性的答案段落，然后用这个\n答案段落去检索真实文档，从而缩小了查询和文档之间的语义鸿沟。"
+              },
+              {
+                "number": 4,
+                "quote": "请直接写一段中等长度、客观、包含关键术语的段落"
+              },
+              {
+                "number": 1,
+                "quote": "生成假设答案文档，桥接查询和文档的语义鸿沟"
+              }
+            ]
+          }
+        ]
+      },
+      "expected_statuses": [
+        "supported"
+      ],
+      "required_terms": [
+        "MQE",
+        "HyDE",
+        "多个查询",
+        "答案段落"
+      ],
+      "forbidden_terms": [],
+      "sources": [
+        {
+          "number": 1,
+          "title": "示例资料 1",
+          "content": "MQE通过LLM生成语义等价但表述不同的查询，从多个角度理解用户意图，提升召回率30%-50%。\n生成假设答案文档，桥接查询和文档的语义鸿沟"
+        },
+        {
+          "number": 2,
+          "title": "示例资料 2",
+          "content": "生成语义等价或互\n补的多样化查询。\nHyDE通过让LLM先生成一个假设性的答案段落，然后用这个\n答案段落去检索真实文档，从而缩小了查询和文档之间的语义鸿沟。"
+        },
+        {
+          "number": 3,
+          "title": "示例资料 3",
+          "content": "\"如何学习Python\"可以扩展为\"Python入门教程\"、\"Python学习方法\"、\"Python编程指南\"等多个查询。"
+        },
+        {
+          "number": 4,
+          "title": "示例资料 4",
+          "content": "请直接写一段中等长度、\n客观、包含关键术语的段落。\n请直接写一段中等长度、\n客观、包含关键术语的段落"
+        },
+        {
+          "number": 5,
+          "title": "示例资料 5",
+          "content": "本片段为无关的测试资料。"
+        },
+        {
+          "number": 6,
+          "title": "示例资料 6",
+          "content": "本片段为无关的测试资料。"
+        },
+        {
+          "number": 7,
+          "title": "示例资料 7",
+          "content": "本片段为无关的测试资料。"
+        },
+        {
+          "number": 8,
+          "title": "示例资料 8",
+          "content": "本片段为无关的测试资料。"
+        }
+      ]
+    },
+    {
+      "id": "q03-wrong-independent-citation",
+      "query": "依据示例资料核对方法、参数和引用。",
+      "draft": "容量48条[1]；TTL750分钟[2]。",
+      "captured_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 2,
+                "quote": "TTL750分钟。"
+              }
+            ]
+          }
+        ]
+      },
+      "corrected_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": false,
+            "quotes": []
+          }
+        ]
+      },
+      "expected_statuses": [
+        "unsupported"
+      ],
+      "required_terms": [],
+      "forbidden_terms": [
+        "750分钟"
+      ],
+      "sources": [
+        {
+          "number": 1,
+          "title": "示例资料 1",
+          "content": "本片段为无关的测试资料。"
+        },
+        {
+          "number": 2,
+          "title": "示例资料 2",
+          "content": "本片段为无关的测试资料。"
+        },
+        {
+          "number": 3,
+          "title": "示例资料 3",
+          "content": "本片段为无关的测试资料。"
+        }
+      ]
+    },
+    {
+      "id": "q04-changed-code",
+      "query": "依据示例资料核对方法、参数和引用。",
+      "draft": "`per = pool // size` [1]。",
+      "captured_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "per = max(1, pool // max(1, size))"
+              }
+            ]
+          }
+        ]
+      },
+      "corrected_review": null,
+      "expected_statuses": [
+        "unsupported"
+      ],
+      "required_terms": [],
+      "forbidden_terms": [
+        "pool // size"
+      ],
+      "sources": [
+        {
+          "number": 1,
+          "title": "示例资料 1",
+          "content": "per = max(1, pool // max(1, size))"
+        }
+      ]
+    },
+    {
+      "id": "q05-real-rejection",
+      "query": "依据示例资料核对方法、参数和引用。",
+      "draft": "无需审批[1]。",
+      "captured_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": false,
+            "quotes": []
+          }
+        ]
+      },
+      "corrected_review": null,
+      "expected_statuses": [
+        "unsupported"
+      ],
+      "required_terms": [],
+      "forbidden_terms": [
+        "无需审批"
+      ],
+      "sources": [
+        {
+          "number": 1,
+          "title": "示例资料 1",
+          "content": "本片段为无关的测试资料。"
+        }
+      ]
+    },
+    {
+      "id": "q06-correct-code",
+      "query": "依据示例资料核对方法、参数和引用。",
+      "draft": "```python\nper = max(1, pool // max(1, size))\n``` [1]",
+      "captured_review": {
+        "blocks": [
+          {
+            "index": 0,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "per = max(1, pool // max(1, size))"
+              }
+            ]
+          }
+        ]
+      },
+      "corrected_review": null,
+      "expected_statuses": [
+        "supported"
+      ],
+      "required_terms": [
+        "max(1, pool // max(1, size))"
+      ],
+      "forbidden_terms": [],
+      "sources": [
+        {
+          "number": 1,
+          "title": "示例资料 1",
+          "content": "per = max(1, pool // max(1, size))"
+        }
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-"""Regress captured quote failures without relaxing source or code checks."""
+"""Check quote repair without relaxing source or code validation."""
 import asyncio
 import json
 from pathlib import Path
@@ -9,7 +9,7 @@ import pytest
 
 from app.rag import answer_verifier as mod
 
-DATASET = json.loads((Path(__file__).resolve().parents[2] / 'evaluation/answer_quote_repair_v1.json').read_bytes())
+DATASET = json.loads((Path(__file__).resolve().parents[1] / 'fixtures/quote_repair.json').read_bytes())
 
 
 def response(data):
@@ -21,7 +21,7 @@ def keep(index, number=1, quote='容量48条。'):
 
 
 @pytest.mark.parametrize('case', DATASET['cases'], ids=lambda c: c['id'])
-async def test_captured_failures_recover_only_after_fresh_valid_review(case):
+async def test_quote_failures_recover_only_after_fresh_valid_review(case):
     blocks, groups = mod._review_units(case['draft'])
     initial = mod._apply_review(case['captured_review'], blocks, case['sources'], table_groups=groups)
     calls = [response(case['captured_review'])]

@@ -1,0 +1,29 @@
+{
+  "version": "heading-layout-fixture-v1",
+  "cases": [
+    {
+      "id": "layout-with-incomplete-review",
+      "draft": "## 各自生成什么\n\n**MQE**：生成多个查询 [1]。\n\n**HyDE**：生成假设文档 [1]。\n\n## 比较（仅依据资料）\n\n| 对比项 | MQE | HyDE |\n| --- | --- | --- |\n| 生成内容 | 查询 [1] | 文档 [1] |\n| 输入 | 问题 [1] | 问题 [1] |\n| 用途 | 召回 [1] | 召回 [1] |\n| 输出形式 | 多条 [1] | 段落 [1] |\n\n两者都用于辅助检索 [1]。",
+      "sources": [
+        {
+          "number": 1,
+          "content": "MQE生成多个查询；HyDE生成假设文档；两者辅助检索。"
+        }
+      ],
+      "captured_review": {
+        "blocks": [
+          {
+            "index": 1,
+            "keep": true,
+            "quotes": [
+              {
+                "number": 1,
+                "quote": "MQE生成多个查询"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

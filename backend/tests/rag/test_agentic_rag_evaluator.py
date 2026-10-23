@@ -226,11 +226,11 @@ async def test_private_provider_failure_status_does_not_expose_exception_body(ht
     assert "secret-" not in json.dumps(diagnostics) + str(warnings)
 
 
-_REFERENCE_CASES = json.loads((Path(__file__).resolve().parents[2] / "evaluation/answerability_reference_v1.json").read_bytes())["cases"]
+_REFERENCE_CASES = json.loads((Path(__file__).resolve().parents[1] / "fixtures/answerability_reference.json").read_bytes())["cases"]
 
 
 @pytest.mark.parametrize("case", _REFERENCE_CASES, ids=lambda case: case["id"])
-async def test_captured_reference_error_and_frozen_rejection_controls(case):
+async def test_reference_repair_and_rejection_controls(case):
     evidence = [Evidence.model_validate(item) for item in case["evidence"]]
     raw = json.dumps(case["decision"], ensure_ascii=False)
     diagnostics = {}
@@ -238,7 +238,7 @@ async def test_captured_reference_error_and_frozen_rejection_controls(case):
     result = await AnswerabilityEvaluator(model, diagnostics=diagnostics).evaluate(case["query"], evidence)
     assert result.answerable is case["expected_answerable"]
     assert len(model.prompts) == 1 and diagnostics["raw_review"] == raw
-    if case["id"] == "a01-captured-wrong-chunk":
+    if case["id"] == "a01-same-document-reference":
         assert diagnostics["quote_reference_repairs"] == [{
             "from_evidence_id": evidence[1].id, "to_evidence_id": evidence[2].id,
         }]
