@@ -14,13 +14,12 @@
 
 检查回答引用、PDF 页码、Word 章节和表格行。资料没有提供的手机号等信息应返回依据不足提示。
 
-## 可选的接口验收
+## 建议的体验顺序
 
-在 Compose 服务已启动、模型配置完整时，从项目根目录执行：
+1. 上传 PDF 和 Word，观察文档从处理中变为索引完成。
+2. 点击资料名称，查看正文、切片和可用位置。
+3. 从问题清单中先选择单份资料问题，再选择跨资料问题。
+4. 展开回答来源，核对页码、章节与原文表格行。
+5. 继续追问，确认系统沿用当前主题并重新检索依据。
 
-```bash
-docker cp demo/ingestion/. ragnotebook-backend-1:/app/data/evaluation/ingestion-fixtures
-docker exec ragnotebook-backend-1 python scripts/eval_ingestion.py
-```
-
-工具创建随机临时测试空间，调用上传及 SSE 问答，并清理自己的测试文档和会话。默认输出写入 `backend/data/evaluation/ingestion-*`。它需要后端容器的本机管理权限，会调用实际模型；适合在独立测试环境运行。
+自动化回归检查见 [检查说明](../../docs/TESTING.md)。

@@ -18,14 +18,8 @@ data/
 # 与镜像无关的文件
 tests/
 results/
-scripts/*
-!scripts/eval_fixed.py
-!scripts/eval_grounding.py
-!scripts/eval_answers.py
-!scripts/eval_ingestion.py
-!scripts/eval_verification.py
-!scripts/eval_traced_ingestion.py
-!scripts/eval_topk.py
+scripts/
+evaluation/
 openapi.json
 .idea/
 *.db

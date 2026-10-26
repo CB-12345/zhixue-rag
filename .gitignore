@@ -39,6 +39,16 @@ dist/
 /tmp/
 /LOCAL_SETUP.md
 # Local experiment reports and private notes
+/backend/scripts/
+/backend/evaluation/
+/scripts/acceptance.py
+/scripts/benchmark_rag.py
+/scripts/tests/
+/debug/
+/traces/
+/reports/
+*.har
+*.trace
 /docs/*-20*/
 /docs/acceptance*.json
 /backend/evaluation/local/

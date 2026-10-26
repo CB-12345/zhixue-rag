@@ -55,9 +55,9 @@ flowchart LR
 
 | 存储 | 内容 |
 | --- | --- |
-| MySQL | 用户、笔记、聊天记录、文档登记与任务状态 |
+| MySQL | 用户、笔记、聊天记录、文档登记、任务状态与 Agent checkpoint |
 | Neo4j | 文档与笔记切片、向量及全文索引、实体和关系 |
-| Redis | 缓存和 Agent 运行相关状态 |
+| Redis | 用户缓存、Token 黑名单与请求限流 |
 | `backend/media` | 用户上传与解析产生的媒体文件 |
 | `backend/data` | 本机运行数据、工具输出及临时资料 |
 
